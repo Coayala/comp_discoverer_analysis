@@ -1,0 +1,290 @@
+---
+title: "Compound discover data analysis"
+author: "Christian Ayala"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+#1. Importing Libraries
+
+```{r libraries, echo=F}
+library(tidyverse)
+library(ggpubr)
+library(ggsci)
+library(ggpolypath)
+library(venn)
+source('functions_labeled_analysis.R')
+```
+
+#2. Import data
+
+```{r path}
+#set path variables
+project_dir <- getwd()
+project_name <- 'Bog_lbl_unlbl_comparisons'
+```
+
+#3. Data Manipularion and thermodynamic indices calculations
+
+```{r data}
+# Import data tables
+compounds_file <- file.path(project_dir, 'data', paste0('Compounds_', project_name, '.tsv'))
+compounds_table <- read_tsv(compounds_file)
+
+label.compounds_file <- file.path(project_dir, 'data', paste0('Labeled Compounds per File_', project_name, '.tsv'))
+label.compounds_table <- read_tsv(label.compounds_file)
+
+# Import metadata
+metadata_file <- file.path(project_dir, 'data', 'metadata.tsv')
+metadata <- read_tsv(metadata_file)
+
+# Select only the necessary columns for downstream analysis
+label.compounds_table <- label.compounds_table[c(4:13, ncol(label.compounds_table))]
+
+# Join the two data matrix to obtain molecular formula and sample file information
+joint_table <- left_join(label.compounds_table, compounds_table, by = c("Molecular Weight"))
+joint_table <- joint_table %>% 
+  drop_na(Formula)
+
+# Split formula column into elemental counts
+joint_table <- separate_formula(joint_table)
+
+# Calculate ratios and thermodynamic indices
+joint_table <- calc_ratios_n_idxs(joint_table)
+
+# Calculate classes
+joint_table <- calc_classes(joint_table)
+
+# Join metadata information
+joint_table <- left_join(joint_table, metadata, by = c('Study File ID' = 'File'))
+joint_table <- joint_table %>% 
+  distinct()
+
+```
+
+#4. Summary plots
+
+```{r n_identified_masses}
+# Number of compounds per file
+summary_table <- joint_table %>% 
+  select(`Study File ID`, Name)
+
+summary_table$Name <- ifelse(is.na(summary_table$Name), 'Not identified', 'Identified')
+
+summary_table <- summary_table %>% 
+  group_by(`Study File ID`) %>% 
+  count(Name)
+
+colnames(summary_table) <- c('Study File ID', 'Status', 'n')
+
+summary_table <- left_join(summary_table, metadata, by = c('Study File ID' = 'File'))
+
+summary_table$`Study File ID` <- factor(summary_table$`Study File ID`, levels = c('F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'F13', 'F14'))
+
+summary_table$Status <- factor(summary_table$Status, levels = c('Not identified', 'Identified'))
+
+sample_names <- tibble(`Study File ID` = c('F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'F13', 'F14'),
+                       sample_name = c('BNC', 'BNE', 'I_E1', 'I_E2', 'I_N1', 'I_N2', 'II_E1', 'II_E2', 'II_N1', 'II_N2', 'III_E1', 'III_E2', 'III_N1', 'III_N2'))
+
+summary_table <- left_join(summary_table, sample_names, by = 'Study File ID')
+
+id_summary_plot <- plot_col(summary_table, sample_name, n, Status, `Sample Type`) +
+  labs(title = 'Number of masses found',
+       x = 'Sample name',
+       y = 'Count') +
+  theme(plot.title = element_text(face = 'bold', hjust = 0.5))
+
+id_summary_plot
+
+ggsave('output_figures/id_summary.png', id_summary_plot, dpi = 300)
+
+```
+
+```{r venn_timelabel}
+# Venn Diagram of the compounds present and shared in each type of sample
+T0.label_list <- joint_table %>% 
+  filter(Time == 'T0', `Sample Type` == 'Labeled') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+T0.nolabel_list <- joint_table %>% 
+  filter(Time == 'T0', `Sample Type` == 'Sample') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+T1.label_list <- joint_table %>% 
+  filter(Time == 'T1', `Sample Type` == 'Labeled') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+T1.nolabel_list <- joint_table %>% 
+  filter(Time == 'T1', `Sample Type` == 'Sample') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+T2.label_list <- joint_table %>% 
+  filter(Time == 'T2', `Sample Type` == 'Labeled') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+T2.nolabel_list <- joint_table %>% 
+  filter(Time == 'T2', `Sample Type` == 'Sample') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+T3.label_list <- joint_table %>% 
+  filter(Time == 'T3', `Sample Type` == 'Labeled') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+T3.nolabel_list <- joint_table %>% 
+  filter(Time == 'T3', `Sample Type` == 'Sample') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+my_list <- list(T0.label = T0.label_list$`Molecular Weight`,
+                T0.nolabel = T0.nolabel_list$`Molecular Weight`,
+                T1.label = T1.label_list$`Molecular Weight`,
+                T1.nolabel = T1.nolabel_list$`Molecular Weight`,
+                T2.label = T2.label_list$`Molecular Weight`,
+                T2.nolabel = T2.nolabel_list$`Molecular Weight`,
+                T3.label = T3.label_list$`Molecular Weight`,
+                T3.nolabel = T3.nolabel_list$`Molecular Weight`)
+my_colors <- c('red', 'blue', 'green', 'yellow', 'skyblue', 'brown', 'purple', 'yellow')
+
+png('output_figures/venn_timelabel.png')
+venn_timelabel <- plot_venn(my_list, my_colors)
+dev.off()
+```
+
+```{r venn_time}
+
+# Venn diagram of the compounds present in each time
+T0_list <- joint_table %>% 
+  filter(Time == 'T0') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+T1_list <- joint_table %>% 
+  filter(Time == 'T1') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+T2_list <- joint_table %>% 
+  filter(Time == 'T2') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+T3_list <- joint_table %>% 
+  filter(Time == 'T3') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+my_list <- list(T0 = T0_list$`Molecular Weight`,
+                T1 = T1_list$`Molecular Weight`,
+                T2 = T2_list$`Molecular Weight`,
+                T3 = T3_list$`Molecular Weight`)
+
+my_colors <- c('red', 'blue', 'green', 'yellow')
+
+png('output_figures/venn_time.png')
+venn_time <- plot_venn(my_list, my_colors)
+dev.off()
+
+```
+
+```{r venn_type}
+# Venn diagram of the compounds present in each time
+label_list <- joint_table %>% 
+  filter(`Sample Type` == 'Labeled') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+nonlabel_list <- joint_table %>% 
+  filter(`Sample Type` == 'Sample') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+my_list <- list(Labeled = label_list$`Molecular Weight`,
+                Non_labeled = nonlabel_list$`Molecular Weight`)
+
+my_colors <- c('red', 'blue')
+
+png('output_figures/venn_type.png')
+venn_time <- plot_venn(my_list, my_colors)
+dev.off()
+```
+
+
+#5. Van Krevelen Diagrams
+
+```{r vank_plot_time}
+
+# Ven Krevelen Diagram based on time
+vank_time <- plot_vank(joint_table, Class, Time)
+
+vank_time <- vank_time + 
+  annotate("rect", xmin = 1.08, xmax = 1.13, ymin = 2.1, ymax = 2.5, colour = 'red', fill = NA, linetype = 'dashed') +
+  annotate("rect", xmin = 0.08, xmax = 0.1, ymin = 1.65, ymax = 2, colour = 'red', fill = NA, linetype = 'dashed')
+
+vank_time
+
+ggsave('output_figures/Vank_diagram_time.jpg', vank_time, dpi = 300)
+
+```
+
+```{r vank_material}
+
+# Ven Krevelen Diagram based on type of organic material
+vank_material <- plot_vank(joint_table, Class, Material)
+vank_material
+
+ggsave('output_figures/Venk_diagram_material.jpg', vank_material, dpi = 300)
+
+vank_time_label <- plot_vank(joint_table, Class, Time, `Sample Type`)
+
+vank_time_label
+
+ggsave('output_figures/Venk_diagram_time_label.jpg', vank_time_label, dpi = 300)
+```
+
+
+#6. Gibbs Free energy boxplot
+
+```{r gfe_type}
+
+# Boxplot of Gibbs Free Energy based on sample type
+my_comparisons <- list(c('Labeled', 'Sample'))
+
+gfe_sampletype <- plot_boxplot(joint_table, `Sample Type`, GFE, my_comparisons)
+
+gfe_sampletype <- gfe_sampletype +
+  labs(title = 'Gibbs Free Energy') +
+  theme(plot.title = element_text(face = 'bold', hjust = 0.5))
+
+gfe_sampletype
+
+ggsave('output_figures/gfe_sampletype.png', gfe_sampletype, dpi = 300)
+```
+
+```{r gfe_time}
+
+# Boxplot of Gibbs Free Energy based on time
+my_comparisons <- list(c('T0', 'T1'), c('T0', 'T2'), c('T0', 'T3'))
+
+gfe_time <- plot_boxplot(joint_table, Time, GFE, my_comparisons)
+
+gfe_time <- gfe_time +
+  labs(title = 'Gibbs Free Energy') +
+  theme(plot.title = element_text(face = 'bold', hjust = 0.5))
+
+gfe_time
+
+ggsave('output_figures/gfe_time.png', gfe_time, dpi = 300)
+```
+
