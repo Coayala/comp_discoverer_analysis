@@ -2,7 +2,7 @@
 data/
 output_figures/
 output_tables/
-
+*.Rproj
 
 # History files
 .Rhistory

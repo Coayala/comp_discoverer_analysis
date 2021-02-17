@@ -158,7 +158,8 @@ plot_col <- function(df, my_x, my_y, color_by1, color_by2){
              y = {{my_y}})) +
     geom_col(aes(fill = {{color_by1}},
                  color = {{color_by2}}),
-             size = 2) +
+             size = 2,
+             width = 0.75) +
     scale_fill_jco() +
     scale_color_jama() +
     theme_bw()

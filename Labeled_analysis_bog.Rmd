@@ -10,9 +10,9 @@ editor_options:
   chunk_output_type: console
 ---
 
-#1. Importing Libraries
+# 1. Importing Libraries
 
-```{r libraries, echo=F}
+```{r libraries, echo=FALSE}
 library(tidyverse)
 library(ggpubr)
 library(ggsci)
@@ -21,17 +21,17 @@ library(venn)
 source('functions_labeled_analysis.R')
 ```
 
-#2. Import data
+# 2. Import data
 
-```{r path}
+```{r set_path}
 #set path variables
 project_dir <- getwd()
 project_name <- 'Bog_lbl_unlbl_comparisons'
+figures_dir <- file.path(project_dir, 'output_figures')
+tables_dir <- file.path(project_dir, 'output_tables')
 ```
 
-#3. Data Manipularion and thermodynamic indices calculations
-
-```{r data}
+```{r import_data, echo=FALSE}
 # Import data tables
 compounds_file <- file.path(project_dir, 'data', paste0('Compounds_', project_name, '.tsv'))
 compounds_table <- read_tsv(compounds_file)
@@ -39,10 +39,21 @@ compounds_table <- read_tsv(compounds_file)
 label.compounds_file <- file.path(project_dir, 'data', paste0('Labeled Compounds per File_', project_name, '.tsv'))
 label.compounds_table <- read_tsv(label.compounds_file)
 
-# Import metadata
+# Import metadata and fix names
 metadata_file <- file.path(project_dir, 'data', 'metadata.tsv')
 metadata <- read_tsv(metadata_file)
 
+metadata$`Sample Identifier` <- str_remove(metadata$`Sample Identifier`, 'Saleska_')
+metadata$`Sample Identifier` <- str_remove(metadata$`Sample Identifier`, '_23.*')
+```
+
+
+# 3. Data Manipulation and thermodynamic indices calculations
+
+Join the two data tables *Compounds* table and the *Labeled Compounds per File* table.
+Using the predicted molecular formula of each compound, the thermodynamic indexes.
+
+```{r data, echo=FALSE}
 # Select only the necessary columns for downstream analysis
 label.compounds_table <- label.compounds_table[c(4:13, ncol(label.compounds_table))]
 
@@ -64,17 +75,22 @@ joint_table <- calc_classes(joint_table)
 joint_table <- left_join(joint_table, metadata, by = c('Study File ID' = 'File'))
 joint_table <- joint_table %>% 
   distinct()
-
 ```
 
-#4. Summary plots
+# 4. Summary plots
+
+## 4.1. Number of identified compounds
+
+This figure shows the number of compounds that were detected in each file, and how many of them were assigned a structure through database searches
 
 ```{r n_identified_masses}
-# Number of compounds per file
+# Create a new tibble to count the number of compounds per file
 summary_table <- joint_table %>% 
   select(`Study File ID`, Name)
 
-summary_table$Name <- ifelse(is.na(summary_table$Name), 'Not identified', 'Identified')
+# Compounds with names are the ones that have an assigned structure
+
+summary_table$Name <- ifelse(is.na(summary_table$Name), 'No structure', 'With structure')
 
 summary_table <- summary_table %>% 
   group_by(`Study File ID`) %>% 
@@ -82,28 +98,31 @@ summary_table <- summary_table %>%
 
 colnames(summary_table) <- c('Study File ID', 'Status', 'n')
 
+# Join summary table with metadata information
+
 summary_table <- left_join(summary_table, metadata, by = c('Study File ID' = 'File'))
 
-summary_table$`Study File ID` <- factor(summary_table$`Study File ID`, levels = c('F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'F13', 'F14'))
+summary_table$`Study File ID` <- factor(summary_table$`Study File ID`, levels = c('BNE', 'BNC', 'I_Bog_E1', 'I_Bog_E2', 'I_Bog_N1', 'I_Bog_N2', 'II_Bog_E1', 'II_Bog_E2', 'II_Bog_N1', 'II_Bog_N2', 'III_Bog_E1', 'III_Bog_E2', 'III_Bog_N1', 'III_Bog_N2'))
 
-summary_table$Status <- factor(summary_table$Status, levels = c('Not identified', 'Identified'))
+summary_table$Status <- factor(summary_table$Status, levels = c('No structure', 'With structure'))
 
-sample_names <- tibble(`Study File ID` = c('F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'F13', 'F14'),
-                       sample_name = c('BNC', 'BNE', 'I_E1', 'I_E2', 'I_N1', 'I_N2', 'II_E1', 'II_E2', 'II_N1', 'II_N2', 'III_E1', 'III_E2', 'III_N1', 'III_N2'))
-
-summary_table <- left_join(summary_table, sample_names, by = 'Study File ID')
-
-id_summary_plot <- plot_col(summary_table, sample_name, n, Status, `Sample Type`) +
+id_summary_plot <- plot_col(summary_table, `Sample Identifier`, n, Status, `Sample Type`) +
   labs(title = 'Number of masses found',
        x = 'Sample name',
        y = 'Count') +
-  theme(plot.title = element_text(face = 'bold', hjust = 0.5))
+  theme(plot.title = element_text(face = 'bold', hjust = 0.5),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1))
 
 id_summary_plot
 
 ggsave('output_figures/id_summary.png', id_summary_plot, dpi = 300)
 
 ```
+
+## 4.2. Venn Diagrams of number of detected compouns
+
+By time and label
 
 ```{r venn_timelabel}
 # Venn Diagram of the compounds present and shared in each type of sample
@@ -160,7 +179,11 @@ my_colors <- c('red', 'blue', 'green', 'yellow', 'skyblue', 'brown', 'purple', '
 png('output_figures/venn_timelabel.png')
 venn_timelabel <- plot_venn(my_list, my_colors)
 dev.off()
+
+venn_timelabel <- plot_venn(my_list, my_colors)
 ```
+
+Only by time
 
 ```{r venn_time}
 
@@ -196,7 +219,10 @@ png('output_figures/venn_time.png')
 venn_time <- plot_venn(my_list, my_colors)
 dev.off()
 
+venn_time <- plot_venn(my_list, my_colors)
 ```
+
+By label or unlabeled
 
 ```{r venn_type}
 # Venn diagram of the compounds present in each time
@@ -221,7 +247,12 @@ dev.off()
 ```
 
 
-#5. Van Krevelen Diagrams
+#5. Exploratory plots
+
+## 5.1. Van Krevelen Diagrams
+
+Van Krevelen diagrams faceted by different parameters
+
 
 ```{r vank_plot_time}
 
