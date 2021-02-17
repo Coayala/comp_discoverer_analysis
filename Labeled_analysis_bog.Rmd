@@ -12,7 +12,7 @@ editor_options:
 
 # 1. Importing Libraries
 
-```{r libraries, echo=FALSE}
+```{r libraries, message=FALSE}
 library(tidyverse)
 library(ggpubr)
 library(ggsci)
@@ -23,7 +23,7 @@ source('functions_labeled_analysis.R')
 
 # 2. Import data
 
-```{r set_path}
+```{r set_path, message=FALSE}
 #set path variables
 project_dir <- getwd()
 project_name <- 'Bog_lbl_unlbl_comparisons'
@@ -31,7 +31,7 @@ figures_dir <- file.path(project_dir, 'output_figures')
 tables_dir <- file.path(project_dir, 'output_tables')
 ```
 
-```{r import_data, echo=FALSE}
+```{r import_data, message=FALSE}
 # Import data tables
 compounds_file <- file.path(project_dir, 'data', paste0('Compounds_', project_name, '.tsv'))
 compounds_table <- read_tsv(compounds_file)
@@ -53,7 +53,7 @@ metadata$`Sample Identifier` <- str_remove(metadata$`Sample Identifier`, '_23.*'
 Join the two data tables *Compounds* table and the *Labeled Compounds per File* table.
 Using the predicted molecular formula of each compound, the thermodynamic indexes.
 
-```{r data, echo=FALSE}
+```{r data, message=FALSE}
 # Select only the necessary columns for downstream analysis
 label.compounds_table <- label.compounds_table[c(4:13, ncol(label.compounds_table))]
 
@@ -64,6 +64,7 @@ joint_table <- joint_table %>%
 
 # Split formula column into elemental counts
 joint_table <- separate_formula(joint_table)
+joint_table <- distinct(joint_table)
 
 # Calculate ratios and thermodynamic indices
 joint_table <- calc_ratios_n_idxs(joint_table)
@@ -73,8 +74,7 @@ joint_table <- calc_classes(joint_table)
 
 # Join metadata information
 joint_table <- left_join(joint_table, metadata, by = c('Study File ID' = 'File'))
-joint_table <- joint_table %>% 
-  distinct()
+
 ```
 
 # 4. Summary plots
@@ -83,7 +83,7 @@ joint_table <- joint_table %>%
 
 This figure shows the number of compounds that were detected in each file, and how many of them were assigned a structure through database searches
 
-```{r n_identified_masses}
+```{r n_identified_masses, message=FALSE}
 # Create a new tibble to count the number of compounds per file
 summary_table <- joint_table %>% 
   select(`Study File ID`, Name)
@@ -116,7 +116,8 @@ id_summary_plot <- plot_col(summary_table, `Sample Identifier`, n, Status, `Samp
 
 id_summary_plot
 
-ggsave('output_figures/id_summary.png', id_summary_plot, dpi = 300)
+figure_file <- file.path(figures_dir, 'id_summary.png')
+ggsave(figure_file, id_summary_plot, dpi = 300)
 
 ```
 
@@ -124,7 +125,7 @@ ggsave('output_figures/id_summary.png', id_summary_plot, dpi = 300)
 
 By time and label
 
-```{r venn_timelabel}
+```{r venn_timelabel, message=FALSE}
 # Venn Diagram of the compounds present and shared in each type of sample
 T0.label_list <- joint_table %>% 
   filter(Time == 'T0', `Sample Type` == 'Labeled') %>% 
@@ -176,7 +177,8 @@ my_list <- list(T0.label = T0.label_list$`Molecular Weight`,
                 T3.nolabel = T3.nolabel_list$`Molecular Weight`)
 my_colors <- c('red', 'blue', 'green', 'yellow', 'skyblue', 'brown', 'purple', 'yellow')
 
-png('output_figures/venn_timelabel.png')
+figure_file <- file.path(figures_dir, 'venn_timelabel.png')
+png(figure_file)
 venn_timelabel <- plot_venn(my_list, my_colors)
 dev.off()
 
@@ -185,7 +187,7 @@ venn_timelabel <- plot_venn(my_list, my_colors)
 
 Only by time
 
-```{r venn_time}
+```{r venn_time, message=FALSE}
 
 # Venn diagram of the compounds present in each time
 T0_list <- joint_table %>% 
@@ -215,7 +217,8 @@ my_list <- list(T0 = T0_list$`Molecular Weight`,
 
 my_colors <- c('red', 'blue', 'green', 'yellow')
 
-png('output_figures/venn_time.png')
+figure_file <- file.path(figures_dir, 'venn_time.png')
+png(figure_file)
 venn_time <- plot_venn(my_list, my_colors)
 dev.off()
 
@@ -224,7 +227,7 @@ venn_time <- plot_venn(my_list, my_colors)
 
 By label or unlabeled
 
-```{r venn_type}
+```{r venn_type, message=FALSE}
 # Venn diagram of the compounds present in each time
 label_list <- joint_table %>% 
   filter(`Sample Type` == 'Labeled') %>% 
@@ -241,7 +244,8 @@ my_list <- list(Labeled = label_list$`Molecular Weight`,
 
 my_colors <- c('red', 'blue')
 
-png('output_figures/venn_type.png')
+figure_file <- file.path(figures_dir, 'venn_type.png')
+png(figure_file)
 venn_time <- plot_venn(my_list, my_colors)
 dev.off()
 ```
@@ -254,7 +258,7 @@ dev.off()
 Van Krevelen diagrams faceted by different parameters
 
 
-```{r vank_plot_time}
+```{r vank_plot_time, message=FALSE}
 
 # Ven Krevelen Diagram based on time
 vank_time <- plot_vank(joint_table, Class, Time)
@@ -265,11 +269,12 @@ vank_time <- vank_time +
 
 vank_time
 
-ggsave('output_figures/Vank_diagram_time.jpg', vank_time, dpi = 300)
+figure_file <- file.path(figures_dir, 'Venk_diagram_time.jpg')
+ggsave(figure_file, vank_time, dpi = 300)
 
 ```
 
-```{r vank_material}
+```{r vank_material, message=FALSE}
 
 # Ven Krevelen Diagram based on type of organic material
 vank_material <- plot_vank(joint_table, Class, Material)
@@ -281,41 +286,76 @@ vank_time_label <- plot_vank(joint_table, Class, Time, `Sample Type`)
 
 vank_time_label
 
-ggsave('output_figures/Venk_diagram_time_label.jpg', vank_time_label, dpi = 300)
+figure_file <- file.path(figures_dir, 'Venk_diagram_time_label.jpg')
+ggsave(figure_file, vank_time_label, dpi = 300)
 ```
 
 
-#6. Gibbs Free energy boxplot
+## 6.1 Gibbs Free Energy (GFE) exploratory plots
 
-```{r gfe_type}
+Boxplot of Labeled vs Unlabeled samples
+
+```{r gfe_box_type, message=FALSE}
 
 # Boxplot of Gibbs Free Energy based on sample type
 my_comparisons <- list(c('Labeled', 'Sample'))
 
-gfe_sampletype <- plot_boxplot(joint_table, `Sample Type`, GFE, my_comparisons)
+gfe_sampletype <- plot_boxplot(joint_table, `Sample Type`, GFE, `Sample Type`, my_comparisons)
 
 gfe_sampletype <- gfe_sampletype +
-  labs(title = 'Gibbs Free Energy') +
-  theme(plot.title = element_text(face = 'bold', hjust = 0.5))
+  labs(title = 'Gibbs Free Energy')
 
 gfe_sampletype
 
-ggsave('output_figures/gfe_sampletype.png', gfe_sampletype, dpi = 300)
+figure_file <- file.path(figures_dir, 'gfe_sampletype.png')
+ggsave(figure_file, gfe_sampletype, dpi = 300)
 ```
 
-```{r gfe_time}
+Boxplot of GFE at different timepoints
+
+```{r gfe_box_time, message=FALSE}
 
 # Boxplot of Gibbs Free Energy based on time
 my_comparisons <- list(c('T0', 'T1'), c('T0', 'T2'), c('T0', 'T3'))
 
-gfe_time <- plot_boxplot(joint_table, Time, GFE, my_comparisons)
+gfe_time <- plot_boxplot(joint_table, Time, GFE, Time, my_comparisons)
 
 gfe_time <- gfe_time +
-  labs(title = 'Gibbs Free Energy') +
-  theme(plot.title = element_text(face = 'bold', hjust = 0.5))
+  labs(title = 'Gibbs Free Energy')
 
 gfe_time
 
-ggsave('output_figures/gfe_time.png', gfe_time, dpi = 300)
+figure_file <- file.path(figures_dir, 'gfe_time.png')
+ggsave(figure_file, gfe_time, dpi = 300)
+```
+
+Density plot of Gibbs Free Energy per timepoint among labeled and unlabeled samples
+
+```{r gfe_density, message=FALSE}
+gfe_density <- plot_density(joint_table, GFE, Time, `Sample Type`, Time)
+
+gfe_density <- gfe_density +
+  labs(title = 'Gibbs Free Energy')
+  
+gfe_density
+
+figure_file <- file.path(figures_dir, 'gfe_density.png')
+ggsave(figure_file, gfe_density, dpi = 300)
+
+```
+
+## 6.1 Aromaticity Index (AI) exploratory plots
+
+```{r AI_density, message=FALSE}
+
+ai_density <- plot_density(joint_table, AI, Time, `Sample Type`, Time)
+
+ai_density <- ai_density +
+  labs(title = 'Aromaticity Index')
+  
+ai_density
+
+figure_file <- file.path(figures_dir, 'ai_density.png')
+ggsave(figure_file, ai_density, dpi = 300)
 ```
 
