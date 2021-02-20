@@ -1,7 +1,7 @@
 # Personal files and directories
 data/
-output_figures/
-output_tables/
+*output_figures/
+*output_tables/
 *.Rproj
 
 # History files
