@@ -52,7 +52,9 @@ compounds_table <- read_xlsx(compounds_file)
 per_file_table <- compounds_table
 per_file_table$Formula <- ifelse(per_file_table$Formula == 'Checked' | per_file_table$Formula == 'FALSE', NA, per_file_table$Formula)
 per_file_table <- per_file_table %>% 
-  fill(Name, Formula, .direction = 'down') %>% 
+  fill(Formula, .direction = 'down') %>% 
+  group_by(Formula) %>% 
+  fill(Name, .direction = 'down') %>%
   filter(str_detect(`# KEGG Pathways`, 'F')) %>% 
   filter(`# KEGG Pathways` != 'Study File ID')
 per_file_table <- per_file_table[,1:13]
@@ -94,6 +96,9 @@ joint_table <- calc_classes(joint_table)
 
 # Join metadata information
 joint_table <- left_join(joint_table, metadata, by = c('Study File ID' = 'File'))
+
+table_file <- file.path(tables_dir, 'Joint_table.csv')
+write_csv(joint_table, table_file)
 
 ```
 
