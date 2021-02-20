@@ -4,7 +4,43 @@
 # Functions for Labeled_analysis.Rmd
 #
 #
+# -------------------------------------------------------------------------
+find_duplicates <- function(df, ...){ #Based on get_dupes from the janitor package (https://github.com/sfirke/janitor/blob/master/R/get_dupes.R)
+  ##Find elements that are duplicated in a given dataframe
+  
+  ## Get which columns will be used to group and find duplicates
+  expr <- rlang::expr(c(...))
+  pos <- tidyselect::eval_select(expr, data = df)
+  
+  ## Check if using specific columns or the whole dataframe to find duplication
+  if(rlang::dots_n(...) == 0){ # whole dataframe
+    col_names <- names(df)
+    col_names <- rlang::syms(col_names)
+  } else { # only specific columns
+    col_names <- names(pos)
+    col_names <- rlang::syms(col_names)
+  }
+  
+  # Count and filter duplicated columns
+  dup.df <- df %>% 
+    add_count(!!! col_names, name = "Times_repeated") %>% 
+    filter(Times_repeated > 1) %>% 
+    select(Times_repeated, everything())
+  
+  
+  return(dup.df)
+}
 
+solve_duplicates <- function(df, ...){
+  # Function with the set the rules to solve duplicate compounds in the data matrix
+  
+  ## Obtain duplicated columns
+  dup.df <- find_duplicates(df, ...)
+  
+  # Rules to solve duplicated columns based on type of information
+  
+  
+}
 # -------------------------------------------------------------------------
 get_elements <- function(df){
   ## Obtain element list in the formula
@@ -114,6 +150,9 @@ separate_formula <- function(df){
   ## Merge with original matrix
   df <- left_join(df, result_df, by = "Formula")
   
+  df <- distinct(df)
+  
+  return(df)
   
 }
 
@@ -160,7 +199,7 @@ calc_classes <- function(df){
 }
 
 # -------------------------------------------------------------------------
-plot_vank <- function(df, color_by, facet_by, facet_by2 = NULL){
+plot_vank <- function(df, color_by, facet_by = NULL, facet_by2 = NULL){
   ggplot(df,
          aes(x = O_to_C,
              y = H_to_C,
@@ -189,21 +228,23 @@ plot_col <- function(df, my_x, my_y, color_by1, color_by2){
              width = 0.75) +
     scale_fill_jco() +
     scale_color_jama() +
-    theme_bw()
+    theme_bw() +
+    theme(plot.title = element_text(face = 'bold', hjust = 0.5))
 }
 
 # -------------------------------------------------------------------------
-plot_boxplot <- function(df, my_x, my_y, my_comparisons = NULL){
+plot_boxplot <- function(df, my_x, my_y, color_by, my_comparisons = NULL){
   ggplot(df,
          aes(x = {{my_x}},
              y = {{my_y}},
-             fill = {{my_x}})) +
+             fill = {{color_by}})) +
     geom_boxplot() +
     scale_fill_jama() +
     stat_compare_means(comparisons = {{my_comparisons}},
                        method = 't.test',
                        label = 'p.signif') +
-    theme_bw()
+    theme_bw() +
+    theme(plot.title = element_text(face = 'bold', hjust = 0.5))
 }
 
 # -------------------------------------------------------------------------
@@ -212,4 +253,18 @@ plot_venn <- function(my_list, my_colors){
        zcolor = {{my_colors}},
        ilcs = 1,
        sncs = 1)
+}
+
+# -------------------------------------------------------------------------
+plot_density <- function(df, my_x, color_by, facet_by = NULL, facet_by2 = NULL){
+  ggplot(df,
+         aes(x = {{my_x}},
+             fill = {{color_by}})) +
+    geom_density(alpha = 0.6) +
+    scale_fill_jama() +
+    theme_bw() +
+    facet_grid(rows = vars({{facet_by}}),
+               cols = vars({{facet_by2}})) +
+    theme(axis.title.y = element_blank()) +
+    theme(plot.title = element_text(face = 'bold', hjust = 0.5))
 }
