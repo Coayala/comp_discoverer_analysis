@@ -14,6 +14,7 @@ editor_options:
 
 ```{r libraries, message=FALSE}
 library(tidyverse)
+library(readxl)
 library(ggpubr)
 library(ggsci)
 library(ggpolypath)
@@ -31,13 +32,32 @@ figures_dir <- file.path(project_dir, 'output_figures')
 tables_dir <- file.path(project_dir, 'output_tables')
 ```
 
+The data for used in this script must be a **2-level** data exported from **Compound Discoverer**. For this script to work well the following columns must be removed from the tables before exporting them:
+
+
+* *Checked* column from the **Compounds** table
+* *Exchange Rate* columns from the *Labeled Compounds per File* table
+
 ```{r import_data, message=FALSE}
 # Import data tables
-compounds_file <- file.path(project_dir, 'data', paste0('Compounds_', project_name, '.tsv'))
-compounds_table <- read_tsv(compounds_file)
+compounds_file <- file.path(project_dir, 'data', 'Compounds.xlsx')
+compounds_table <- read_xlsx(compounds_file)
 
-label.compounds_file <- file.path(project_dir, 'data', paste0('Labeled Compounds per File_', project_name, '.tsv'))
-label.compounds_table <- read_tsv(label.compounds_file)
+# Separate compounds table and labeled compounds per file table
+per_file_table <- compounds_table
+per_file_table$Formula <- ifelse(per_file_table$Formula == 'Checked' | per_file_table$Formula == 'FALSE', NA, per_file_table$Formula)
+per_file_table <- per_file_table %>% 
+  fill(Name, Formula, .direction = 'down') %>% 
+  filter(str_detect(`# KEGG Pathways`, 'F')) %>% 
+  filter(`# KEGG Pathways` != 'Study File ID')
+per_file_table <- per_file_table[,1:13]
+colnames(per_file_table) <- c('Name', 'Formula', 'Molecular Weight',	'RT [min] per file', 'FWHM [min]',	'Max. # MI',	'# Adducts',	'Area', 'Max. Exchange', 'Avg. Exchange', 'Rel. Exchange [%]', 'Status',	'Study File ID')
+
+compounds_table <- compounds_table %>% 
+  filter(Formula != 'Checked') %>% 
+  filter(Formula != 'FALSE') %>% 
+  select(Name, Formula, `Molecular Weight`, contains('Annotation source'), contains('Results'), contains('Pathways'), `mzCloud Best Match`)
+  
 
 # Import metadata and fix names
 metadata_file <- file.path(project_dir, 'data', 'metadata.tsv')
@@ -50,21 +70,16 @@ metadata$`Sample Identifier` <- str_remove(metadata$`Sample Identifier`, '_23.*'
 
 # 3. Data Manipulation and thermodynamic indices calculations
 
-Join the two data tables *Compounds* table and the *Labeled Compounds per File* table.
+Join the two data tables **Compounds** table and the **Labeled Compounds per File** table.
 Using the predicted molecular formula of each compound, the thermodynamic indexes.
 
 ```{r data, message=FALSE}
-# Select only the necessary columns for downstream analysis
-label.compounds_table <- label.compounds_table[c(4:13, ncol(label.compounds_table))]
 
 # Join the two data matrix to obtain molecular formula and sample file information
-joint_table <- left_join(label.compounds_table, compounds_table, by = c("Molecular Weight"))
-joint_table <- joint_table %>% 
-  drop_na(Formula)
+joint_table <- left_join(per_file_table, compounds_table, by = c('Name', 'Formula', 'Molecular Weight'))
 
 # Split formula column into elemental counts
 joint_table <- separate_formula(joint_table)
-joint_table <- distinct(joint_table)
 
 # Calculate ratios and thermodynamic indices
 joint_table <- calc_ratios_n_idxs(joint_table)
