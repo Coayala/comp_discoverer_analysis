@@ -28,8 +28,12 @@ source('functions_labeled_analysis.R')
 #set path variables
 project_dir <- getwd()
 project_name <- 'Bog_lbl_unlbl_comparisons'
-figures_dir <- file.path(project_dir, 'output_figures')
-tables_dir <- file.path(project_dir, 'output_tables')
+figures_dir <- file.path(project_dir, paste0(project_name, '_output_figures'))
+tables_dir <- file.path(project_dir,  paste0(project_name, '_output_tables'))
+
+# Create output directories
+dir.create(figures_dir, showWarnings = FALSE)
+dir.create(tables_dir, showWarnings = FALSE)
 ```
 
 The data for used in this script must be a **2-level** data exported from **Compound Discoverer**. For this script to work well the following columns must be removed from the tables before exporting them:
