@@ -33,6 +33,7 @@ tables_dir <- file.path(project_dir,  paste0(project_name, '_output_tables'))
 
 # Create output directories
 dir.create(figures_dir, showWarnings = FALSE)
+
 dir.create(tables_dir, showWarnings = FALSE)
 ```
 
@@ -299,7 +300,8 @@ ggsave(figure_file, vank_time, dpi = 300)
 vank_material <- plot_vank(joint_table, Class, Material)
 vank_material
 
-ggsave('output_figures/Venk_diagram_material.jpg', vank_material, dpi = 300)
+figure_file <- file.path(figures_dir, 'Venk_diagram_material.jpg')
+ggsave(figure_file, vank_material, dpi = 300)
 
 vank_time_label <- plot_vank(joint_table, Class, Time, `Sample Type`)
 
