@@ -1,0 +1,274 @@
+---
+title: "Compound discover data analysis - Unlabeled compounds"
+author: "Christian Ayala"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+# 1. Importing Libraries
+
+```{r libraries, message=FALSE}
+library(tidyverse)
+library(readxl)
+library(ggpubr)
+library(ggsci)
+library(ggpolypath)
+library(venn)
+source('functions_labeled_analysis.R')
+```
+
+# 2. Import data
+
+```{r set_path, message=FALSE}
+#set path variables
+project_dir <- getwd()
+project_name <- 'Bog_unlbl'
+figures_dir <- file.path(project_dir, paste0(project_name, '_output_figures'))
+tables_dir <- file.path(project_dir,  paste0(project_name, '_output_tables'))
+
+# Create output directories
+dir.create(figures_dir, showWarnings = FALSE)
+
+dir.create(tables_dir, showWarnings = FALSE)
+```
+
+The data for used in this script must be a **2-level** data exported from **Compound Discoverer**. For this script to work well the following columns must be removed from the tables before exporting them:
+
+
+* *Checked* column from the **Compounds** table
+
+```{r import_data, message=FALSE}
+# Import data tables
+compounds_file <- file.path(project_dir, 'data', 'Compounds_unlabeled.xlsx')
+compounds_table <- read_xlsx(compounds_file)
+
+# Separate compounds table and labeled compounds per file table
+per_file_table <- compounds_table
+per_file_table$Formula <- ifelse(per_file_table$Formula == 'Checked' | per_file_table$Formula == 'FALSE', NA, per_file_table$Formula)
+per_file_table <- per_file_table %>% 
+  fill(Formula, .direction = 'down') %>% 
+  group_by(Formula) %>% 
+  fill(Name, .direction = 'down') %>% 
+  filter(str_detect(`RT [min]`, 'F')) %>% 
+  filter(`RT [min]` != 'Study File ID') %>% 
+  ungroup()
+per_file_table <- per_file_table[,1:9]
+colnames(per_file_table) <- c('Name', 'Formula', 'Molecular Weight',	'RT [min] per file', 'FWHM [min]',	'Max. # MI',	'# Adducts',	'Area', 'Study File ID')
+
+compounds_table <- compounds_table %>% 
+  filter(Formula != 'Checked') %>% 
+  filter(Formula != 'FALSE') %>% 
+  select(Name, Formula, `Molecular Weight`, contains('Annotation source'), contains('Results'), contains('Pathways'), `mzCloud Best Match`)
+  
+
+# Import metadata and fix names
+metadata_file <- file.path(project_dir, 'data', 'metadata_unlabeled.txt')
+metadata <- read_tsv(metadata_file)
+
+metadata$`Sample Identifier` <- str_remove(metadata$`Sample Identifier`, 'Saleska_')
+metadata$`Sample Identifier` <- str_remove(metadata$`Sample Identifier`, '_23.*')
+```
+
+
+# 3. Data Manipulation and thermodynamic indices calculations
+
+Join the two data tables **Compounds** table and the **Labeled Compounds per File** table.
+Using the predicted molecular formula of each compound, the thermodynamic indexes.
+
+```{r data, message=FALSE}
+
+# Join the two data matrix to obtain molecular formula and sample file information
+joint_table <- left_join(per_file_table, compounds_table, by = c('Name', 'Formula', 'Molecular Weight'))
+
+# Split formula column into elemental counts
+joint_table <- separate_formula(joint_table)
+
+# Calculate ratios and thermodynamic indices
+joint_table <- calc_ratios_n_idxs(joint_table)
+
+# Calculate classes
+joint_table <- calc_classes(joint_table)
+
+# Join metadata information
+joint_table <- left_join(joint_table, metadata, by = c('Study File ID' = 'File'))
+
+# Save final data table
+table_file <- file.path(tables_dir, 'Joint_table.csv')
+write_csv(joint_table, table_file)
+
+```
+
+# 4. Summary plots
+
+## 4.1. Number of identified compounds
+
+This figure shows the number of compounds that were detected in each file, and how many of them were assigned a structure through database searches
+
+```{r n_identified_masses, message=FALSE}
+# Create a new tibble to count the number of compounds per file
+summary_table <- joint_table %>% 
+  select(`Study File ID`, Name)
+
+# Compounds with names are the ones that have an assigned structure
+
+summary_table$Name <- ifelse(is.na(summary_table$Name), 'No structure', 'With structure')
+
+summary_table <- summary_table %>% 
+  group_by(`Study File ID`) %>% 
+  count(Name)
+
+colnames(summary_table) <- c('Study File ID', 'Status', 'n')
+
+# Join summary table with metadata information
+
+summary_table <- left_join(summary_table, metadata, by = c('Study File ID' = 'File'))
+
+summary_table$`Study File ID` <- factor(summary_table$`Study File ID`, levels = c('BNC', 'I_Bog_N1', 'I_Bog_N2', 'II_Bog_N1', 'II_Bog_N2', 'III_Bog_N1', 'III_Bog_N2'))
+
+summary_table$Status <- factor(summary_table$Status, levels = c('No structure', 'With structure'))
+
+id_summary_plot <- plot_col(summary_table, `Sample Identifier`, n, Status) +
+  labs(title = 'Number of masses found',
+       x = 'Sample name',
+       y = 'Count') +
+  theme(plot.title = element_text(face = 'bold', hjust = 0.5),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1))
+
+id_summary_plot
+
+figure_file <- file.path(figures_dir, 'id_summary.png')
+ggsave(figure_file, id_summary_plot, dpi = 300)
+
+```
+
+## 4.2. Venn Diagrams of number of detected compouns
+
+By time
+
+```{r venn_time, message=FALSE}
+
+# Venn diagram of the compounds present in each time
+T0_list <- joint_table %>% 
+  filter(Time == 'T0') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+T1_list <- joint_table %>% 
+  filter(Time == 'T1') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+T2_list <- joint_table %>% 
+  filter(Time == 'T2') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+T3_list <- joint_table %>% 
+  filter(Time == 'T3') %>% 
+  select(`Molecular Weight`) %>% 
+  distinct()
+
+my_list <- list(T0 = T0_list$`Molecular Weight`,
+                T1 = T1_list$`Molecular Weight`,
+                T2 = T2_list$`Molecular Weight`,
+                T3 = T3_list$`Molecular Weight`)
+
+my_colors <- c('red', 'blue', 'green', 'yellow')
+
+figure_file <- file.path(figures_dir, 'venn_time.png')
+png(figure_file)
+venn_time <- plot_venn(my_list, my_colors)
+dev.off()
+
+venn_time <- plot_venn(my_list, my_colors)
+```
+
+#5. Exploratory plots
+
+## 5.1. Van Krevelen Diagrams
+
+Van Krevelen diagrams faceted by different parameters
+
+
+```{r vank_plot_time, message=FALSE}
+
+# Ven Krevelen Diagram based on time
+vank_time <- plot_vank(joint_table, Class, Time)
+
+vank_time <- vank_time 
+
+vank_time
+
+figure_file <- file.path(figures_dir, 'Venk_diagram_time.jpg')
+ggsave(figure_file, vank_time, dpi = 300)
+
+```
+
+```{r vank_material, message=FALSE}
+
+# Ven Krevelen Diagram based on type of organic material
+vank_material <- plot_vank(joint_table, Class, material)
+vank_material
+
+figure_file <- file.path(figures_dir, 'Venk_diagram_material.jpg')
+ggsave(figure_file, vank_material, dpi = 300)
+
+```
+
+
+## 6.1 Gibbs Free Energy (GFE) exploratory plots
+
+Boxplot of GFE at different timepoints
+
+```{r gfe_box_time, message=FALSE}
+
+# Boxplot of Gibbs Free Energy based on time
+my_comparisons <- list(c('T0', 'T1'), c('T0', 'T2'), c('T0', 'T3'))
+
+gfe_time <- plot_boxplot(joint_table, Time, GFE, Time, my_comparisons)
+
+gfe_time <- gfe_time +
+  labs(title = 'Gibbs Free Energy')
+
+gfe_time
+
+figure_file <- file.path(figures_dir, 'gfe_time.png')
+ggsave(figure_file, gfe_time, dpi = 300)
+```
+
+Density plot of Gibbs Free Energy per timepoint among labeled and unlabeled samples
+
+```{r gfe_density, message=FALSE}
+gfe_density <- plot_density(joint_table, GFE, Time, facet_by2 = Time)
+
+gfe_density <- gfe_density +
+  labs(title = 'Gibbs Free Energy')
+  
+gfe_density
+
+figure_file <- file.path(figures_dir, 'gfe_density.png')
+ggsave(figure_file, gfe_density, dpi = 300)
+
+```
+
+## 6.1 Aromaticity Index (AI) exploratory plots
+
+```{r AI_density, message=FALSE}
+
+ai_density <- plot_density(joint_table, AI, Time, facet_by2 = Time)
+
+ai_density <- ai_density +
+  labs(title = 'Aromaticity Index')
+  
+ai_density
+
+figure_file <- file.path(figures_dir, 'ai_density.png')
+ggsave(figure_file, ai_density, dpi = 300)
+```
+
