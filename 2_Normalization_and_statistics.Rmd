@@ -80,7 +80,7 @@ write_tsv(auc_table, table_file)
 
 ```{r Data_normalization}
 
-
+global
 
 
 ```
