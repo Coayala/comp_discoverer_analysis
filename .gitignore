@@ -3,6 +3,7 @@ data/
 *output_figures/
 *output_tables/
 *.Rproj
+*.html
 
 # History files
 .Rhistory
