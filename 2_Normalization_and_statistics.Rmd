@@ -15,12 +15,12 @@ This Notebook is to perform normalization of the area under the curve (AUC) of t
 # 1. Importing Libraries
 
 ```{r libraries, message=FALSE}
-library(NormalyzerDE)
 library(tidyverse)
 library(readxl)
 library(ggpubr)
 library(ggsci)
-library(gtools)
+library(gridExtra)
+library(vegan)
 source('functions_cdis_norm_stats.R')
 ```
 
@@ -63,54 +63,137 @@ auc_table <- auc_table %>%
 
 # Save untransformed data
 
-table_file <- file.path(tables_dir, 'untransformed_auc_table.tsv')
-write_tsv(auc_table, table_file)
+auc_table <- column_to_rownames(auc_table, var = 'FeatureID')
 
-# Log-transform the data
+table_file <- file.path(tables_dir, 'raw_auc_table.csv')
+write.csv(auc_table, table_file, row.names = TRUE)
 
-auc_table <- log10(auc_table + 1)
-
-# Save the transformed data
-
-table_file <- file.path(tables_dir, 'transformed_auc_table.tsv')
-write_tsv(auc_table, table_file)
 ```
 
 # 4. Data Normalization by multiple methods
 
+Data is normalized by multiple methods to decide
+
 ```{r Data_normalization}
 
-global
+normalization_plot <- normalize_by_all(auc_table)
+
+figure_file <- file.path(figures_dir, 'all_normalized.boxplot.png')
+ggsave(figure_file, normalization_plot, dpi = 300)
+
+```
+
+Based on the plot select the best normalization method for the sample.
+In this case the best normalization method was **LOESS normalization**
+
+
+```{r Best normalization}
+
+norm.matrix <- cycloess.norm(auc_table)
+
+```
+
+# 5. Statistical Analysis
+
+## 5.1 NMDS 
+
+```{r nmds}
+
 
 
 ```
 
 
+## 5.2 PERMANOVA
 
-```{r NormalyzerDE}
+Permutational Multivariate Analysis of Variance Using Distance Matrices
 
-# Create grouping column in the metadata
+```{r Permanova}
 
-metadata <- metadata %>% 
-  mutate(Group = paste(Label, Time, sep = '.'))
+# This portion of the script comes from the MetaboTandem pipeline
 
-write_tsv(file = file.path(tables_dir, 'group_metadata.tsv'), metadata)
-metadata_file <- file.path(tables_dir, 'group_metadata.tsv')
+# Change missing values for zeroes
 
+norm.matrix[is.na(norm.matrix)] <- 0
+
+# distance matrix - bray
+dm <- vegdist(t(norm.matrix), method="bray")
+
+metadata <- column_to_rownames(metadata, var = 'SampleID')
+
+set.seed(456)
+permanova <- adonis(dm ~ Time + Material + Label, 
+                    data=metadata, 
+                    permutations=999, 
+                    method="bray")
+permanova
+
+
+```
+
+The AUC at different time points contribute to 56% of the differences among the samples
+
+## 5.3 Feature contribution
+
+Explore to determine which features are driving the difference in time
+
+```{r Feature contribution}
+
+# Comparisons are done in pairs
+
+# Comparing based on the sample origin (litter or peat_litter)
+
+sub_metadata <- metadata %>% 
+  filter(Time == 'T0' | Time == 'T3')
+
+sub_norm.matrix <- select(norm.matrix, rownames(sub_metadata))
+
+test <- 'Time'
+set.seed(456)
+# LEAFLIFE; adonis tests homogeneity of dispersion among groups
+p.Time <- adonis(t(sub_norm.matrix) ~ Time, 
+                data=sub_metadata, 
+                permutations=999, 
+                method="bray")
+p.Time
+
+p.Time.features <- coefficients(p.Time)['Time1',]
+p.Time.features <- p.Time.features[rev(order(abs(p.Time.features )))]
+p.Time.features <- as.data.frame(p.Time.features) 
+colnames(p.Time.features) <- paste0(test, '.f.contrib')
+p.Time.features <- signif(p.Time.features, 2)
+p.Time.features$Features <- rownames(p.Time.features) #NEGATIVE = Drives T3, POSITIVE = Drives T0
+
+
+t2 = quantile(abs(p.Time.features$Time.f.contrib), 0.60)
+t2
+p.Time.features.g <- mutate(p.Time.features,
+                            Group = if_else(abs(Time.f.contrib)<t2, 'low contribution',
+                                                if_else(Time.f.contrib>t2, 'T0', 'T3')))
+
+file_table <- (file.path(tables_dir, 'features_contribution_T0vsT3.csv'))
+write_csv(p.Time.features.g, file_table)
+Time.contrib <- 
+  p.Time.features.g %>% 
+  filter(abs(Time.f.contrib)>t2) %>% 
+  ggplot(aes(x = reorder(Features, Time.f.contrib), y = Time.f.contrib, fill = Time.f.contrib > 0)) +
+    geom_bar(stat="identity", width = 1, color='black', size=0.1, alpha=0.6) +
+    scale_fill_jama(labels = c('T3', 'T0')) +
+  theme_bw() +
+  labs(title = 'Feature contribution to the difference observed at different times',
+       x = 'MS Features',
+       y = 'Contribution',
+       fill = 'Drives:') +
+  theme(plot.title = element_text(face = 'bold',
+                                  hjust = 0.5),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
   
 
-desing_table <- tibble(sample = compounds_table$SampleID)
-auc_file <- file.path(tables_dir, 'untransformed_auc_table.tsv')
+Time.contrib
 
-normalyzer(jobName = 'label_test_run', 
-           designPath = metadata_file, 
-           dataPath = auc_file, 
-           outputDir = tables_dir,
-           sampleColName = 'SampleID',
-           groupColName = 'Group',
-           requireReplicates = FALSE)
+figure_file <- file.path(figures_dir, 'Contribution in time.png')
+ggsave(figure_file, Time.contrib, dpi = 300)
 
 ```
-
-
 
