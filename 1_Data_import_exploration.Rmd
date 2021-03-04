@@ -27,6 +27,8 @@ source('functions_cdis_exploration.R')
 ```{r set_path, message=FALSE}
 #set path variables
 project_dir <- getwd()
+
+# Give a name for your project so the results are all grouped together in a directory with the same name
 project_name <- 'Bog_labeled_1.7int'
 figures_dir <- file.path(project_dir, paste0(project_name, '_output_figures'))
 tables_dir <- file.path(project_dir,  paste0(project_name, '_output_tables'))
@@ -72,8 +74,6 @@ write_csv(metadata, table_file)
 
 
 # 3. Data Manipulation and thermodynamic indices calculations
-
-
 
 ```{r data, message=FALSE}
 
@@ -150,6 +150,8 @@ By time and label
 
 ```{r venn_timelabel, message=FALSE}
 # Venn Diagram of the compounds present and shared in each type of sample
+# The following lists should be created based on your own data
+
 T0.label_list <- compounds_table %>% 
   filter(Time == 'T0', Label == 'Labeled') %>% 
   select(`Molecular Weight`) %>% 
