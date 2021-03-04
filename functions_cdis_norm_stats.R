@@ -13,6 +13,7 @@ global.norm <- function(matrix){
   
   colsum <- colSums(matrix, na.rm = TRUE)
   colsum.median <- median(colsum)
+  norm.matrix <- data.frame(matrix(NA, nrow = nrow(matrix), ncol = ncol(matrix)))
   for(col in 1:ncol(matrix)){
     norm.matrix[,col] <- (matrix[,col] / colsum[col]) * colsum.median
   }
@@ -27,6 +28,7 @@ median.norm <- function(matrix){
   
   colmedian <- apply(matrix, 2, FUN = median, na.rm = TRUE)
   colmedian.mean <- mean(colmedian)
+  norm.matrix <- data.frame(matrix(NA, nrow = nrow(matrix), ncol = ncol(matrix)))
   for(col in 1:ncol(matrix)){
     norm.matrix[,col] <- (matrix[,col] / colmedian[col]) * colmedian.mean
   }
@@ -40,6 +42,7 @@ mean.norm <- function(matrix){
   
   colmean <- colMeans(matrix, na.rm = TRUE)
   colmean.mean <- mean(colmean)
+  norm.matrix <- data.frame(matrix(NA, nrow = nrow(matrix), ncol = ncol(matrix)))
   for(col in 1:ncol(matrix)){
     norm.matrix[,col] <- (matrix[,col] / colmean[col]) * colmean.mean
   }
@@ -133,4 +136,19 @@ normalize_by_all <- function(df){
   
   return(all_norm.plot)
 
+}
+
+# -------------------------------------------------------------------------
+plot_nmds <- function(df, color_by, shape_by = NULL){
+  ggplot(df,
+         aes(x = NMDS1,
+             y = NMDS2,
+             color = {{color_by}},
+             shape = {{shape_by}})) +
+    geom_point(size = 3) +
+    scale_color_jama() +
+    theme_bw() +
+    theme(plot.title = element_text(face = 'bold', hjust = 0.5))
+  
+  
 }
