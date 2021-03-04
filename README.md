@@ -5,5 +5,5 @@ Set of scripts to analyze the the data from files exported from Compound Discove
 Clone this repository to start using them
 
 ```
-git clone
+git clone https://github.com/Coayala/comp_discoverer_analysis.git
 ```
