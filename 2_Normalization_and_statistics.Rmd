@@ -21,6 +21,7 @@ library(ggpubr)
 library(ggsci)
 library(gridExtra)
 library(vegan)
+library(factoextra)
 source('functions_cdis_norm_stats.R')
 ```
 
@@ -97,29 +98,83 @@ norm.matrix <- cycloess.norm(auc_table)
 
 ## 5.1 NMDS 
 
-```{r nmds}
+Choose if analysis will be done based on relative abundance or presence absence
 
+```{r typeofanalysis}
 
-
-```
-
-
-## 5.2 PERMANOVA
-
-Permutational Multivariate Analysis of Variance Using Distance Matrices
-
-```{r Permanova}
-
-# This portion of the script comes from the MetaboTandem pipeline
+# This portion of the script cwas adapted from statistical analysis from MetaboTandem and MetaboDirect pipelines
 
 # Change missing values for zeroes
 
 norm.matrix[is.na(norm.matrix)] <- 0
 
-# distance matrix - bray
-dm <- vegdist(t(norm.matrix), method="bray")
+type <- 'ra'
 
-metadata <- column_to_rownames(metadata, var = 'SampleID')
+if(type == 'ra'){
+  nmds.matrix <- t(norm.matrix)
+  dm.method <- 'bray'
+  # distance matrix by Bray because relative abundance mode was selected
+  dm <- vegdist(nmds.matrix, method=dm.method)
+}else if(type == 'pa'){
+  nmds.matrix <- decostand(t(norm.matrix), type)
+  dm.method <- 'euclidean'
+  dm <- vegdist(nmds.matrix, method = dm.method)
+} else{
+  print('Select analysis method: "pa" for presence absence or "ra" for relative abundance')
+}
+
+```
+
+Perform the actual nmds analysis
+
+**A good rule of thumb for interpretation**: 
+- < 0.05 provides an excellent representation in reduced dimensions, 
+- < 0.1 is great, 
+- < 0.2 is good/ok, 
+- < 0.3 provides a poor representation. 
+
+
+```{r nmds}
+
+set.seed(123)
+nmds <- metaMDS(dm,
+                k = 2,
+                maxit = 999,
+                trymax = 500,
+                wascores = TRUE)
+stressplot(nmds)
+
+# Extract nmds scores for plotting
+
+nmds.scores <- as.data.frame(scores(nmds))
+nmds.scores <- rownames_to_column(nmds.scores, var = 'SampleID')
+nmds.scores <- left_join(nmds.scores, metadata, by = 'SampleID')
+
+nmds_plot <- plot_nmds(nmds.scores, Time, Label)
+nmds_plot <- nmds_plot +
+  labs(title = 'NMDS plot by relative abundance')
+nmds_plot
+
+figure_file <- file.path(figures_dir, 'nmds_relative_abundance.png')
+ggsave(figure_file, nmds_plot, dpi = 300)
+
+```
+
+## 5.2 PCA
+
+```{r}
+
+```
+
+
+
+## 5.3 PERMANOVA
+
+Permutational Multivariate Analysis of Variance Using Distance Matrices
+
+```{r Permanova}
+
+rownames(metadata) <- metadata$SampleID
 
 set.seed(456)
 permanova <- adonis(dm ~ Time + Material + Label, 
@@ -131,9 +186,9 @@ permanova
 
 ```
 
-The AUC at different time points contribute to 56% of the differences among the samples
+The permanova shows that AUC at **different time points** contribute to 56% of the differences among the samples
 
-## 5.3 Feature contribution
+## 5.4 Feature contribution
 
 Explore to determine which features are driving the difference in time
 
@@ -196,4 +251,23 @@ figure_file <- file.path(figures_dir, 'Contribution in time.png')
 ggsave(figure_file, Time.contrib, dpi = 300)
 
 ```
+
+```{r}
+neg.features <- p.Time.features.g %>% 
+  slice_min(Time.f.contrib, n = 10)
+
+neg.features <- left_join(neg.features, compounds_table, by = c('Features' = 'FeatureID')) %>% 
+  select(Time.f.contrib, Features, Name, Formula) %>% 
+  distinct()
+
+pos.features <- p.Time.features.g %>% 
+  slice_max(Time.f.contrib, n = 10)
+
+pos.features <- left_join(pos.features, compounds_table, by = c('Features' = 'FeatureID')) %>% 
+  select(Time.f.contrib, Features, Name, Formula) %>% 
+  distinct()
+
+
+```
+
 
