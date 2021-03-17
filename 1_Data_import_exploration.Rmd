@@ -29,7 +29,7 @@ source('functions_cdis_exploration.R')
 project_dir <- getwd()
 
 # Give a name for your project so the results are all grouped together in a directory with the same name
-project_name <- 'Bog_labeled_1.7int'
+project_name <- 'Bog_unlabel_1e5_AND'
 figures_dir <- file.path(project_dir, paste0(project_name, '_output_figures'))
 tables_dir <- file.path(project_dir,  paste0(project_name, '_output_tables'))
 
@@ -45,14 +45,14 @@ The **metadata table** can be exported directly from the **Samples tab** in **Co
 
 ```{r import_data, message=FALSE}
 # Import data tables
-compounds_file <- file.path(project_dir, 'data', 'Bog_lbl_unlbl_1.7int.xlsx')
+compounds_file <- file.path(project_dir, 'data', 'Bog_unlabel_1e5_AND.xlsx')
 compounds_table <- read_xlsx(compounds_file)
 
 # Select columns needed for downstream analysis
 
 compounds_table <- compounds_table %>%
   arrange(desc(`Molecular Weight`)) %>% 
-  mutate(FeatureID = paste0('Feature',n():1)) %>% 
+  mutate(FeatureID = paste0('Feature',n():1)) %>%
   select(FeatureID, Name, Formula, `Molecular Weight`, contains('Annotation source'), contains('Results'), contains('Pathways'), 
          `mzCloud Best Match`, contains('Area:'))
 
@@ -67,7 +67,7 @@ metadata$`Sample Identifier` <- str_remove(metadata$`Sample Identifier`, '_23.*'
 
 metadata <- metadata %>% 
   select(-Error, -Sample, -File) %>% 
-  rename(SampleID = `Sample Identifier`, Label = `Sample Type`)
+  rename(SampleID = `Sample Identifier`)
 
 table_file <- file.path(tables_dir, 'fixed_metadata.csv')
 write_csv(metadata, table_file)
@@ -130,7 +130,7 @@ summary_table <- left_join(summary_table, metadata, by = c('SampleID' = 'Sample 
 
 summary_table$Status <- factor(summary_table$Status, levels = c('No structure', 'With structure'))
 
-id_summary_plot <- plot_col(summary_table, SampleID, n, Status, Label) +
+id_summary_plot <- plot_col(summary_table, SampleID, n, Status) +
   labs(title = 'Number of masses found',
        x = 'Sample name',
        y = 'Count') +
