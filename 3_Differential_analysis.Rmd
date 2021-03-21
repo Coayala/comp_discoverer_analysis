@@ -1,0 +1,210 @@
+---
+title: "3_DIfferential Analysis"
+author: "Christian Ayala"
+date: "3/19/2021"
+output: html_document
+---
+
+This Notebook is to perform the differential analysis of the normalized AUC from *Compound Discoverer*.
+
+# 1. Importing Libraries
+
+```{r libraries, message=FALSE}
+library(tidyverse)
+library(ggpubr)
+library(ggsci)
+library(ggrepel)
+library(pheatmap)
+library(RColorBrewer)
+source('functions_cdis_diff.R')
+```
+
+# 2. Import data
+
+Because differential analysis includes the calculations of means, the data to be used in this section is the normalized untransformed data
+
+```{r set_path, message=FALSE}
+# set path variables
+project_dir <- getwd()
+project_name <- 'Bog_lbl_unlbl_1.7int'
+figures_dir <- file.path(project_dir, paste0(project_name, '_output_figures'))
+tables_dir <- file.path(project_dir,  paste0(project_name, '_output_tables'))
+norm_auc_table_file <- file.path(tables_dir, 'normalized_untransformed_auc_table.csv')
+
+# Load compounds_table
+
+norm.matrix <- read_csv(norm_auc_table_file)
+norm.matrix <- column_to_rownames(norm.matrix, var = 'X1')
+
+# Import metadata and fix names
+metadata_file <- file.path(tables_dir, 'fixed_metadata.csv')
+metadata <- read_csv(metadata_file)
+
+```
+
+# 3. Calculate ratios and log2fold-change
+
+## 3.1 Get samples per each treatment
+
+```{r}
+
+# Get the average AUC per each of the treatments
+## Get samples per treatment
+
+T0.samples <- get_samples(metadata, Treatment = 'Time', value = 'T0')
+T1.samples <- get_samples(metadata, Treatment = 'Time', value = 'T1')
+T2.samples <- get_samples(metadata, Treatment = 'Time', value = 'T2')
+T3.samples <- get_samples(metadata, Treatment = 'Time', value = 'T3')
+
+```
+
+## 3.2 Get table of differentially expressed features per each comparison
+
+```{r}
+
+T1_to_T0.diff_table <- get_diff_table(norm.matrix, control.sample_list = T0.samples, treatment.sample_list = T1.samples)
+T2_to_T0.diff_table <- get_diff_table(norm.matrix, control.sample_list = T0.samples, treatment.sample_list = T2.samples)
+T3_to_T0.diff_table <- get_diff_table(norm.matrix, control.sample_list = T0.samples, treatment.sample_list = T3.samples)
+
+```
+
+# 4. Plots of differentially expressed features
+
+## 4.1 Number of differentially expressed features in each group
+
+```{r}
+
+num_diff_features <- tibble(Comparison = c('T1_to_T0', 'T2_to_T0', 'T3_to_T0'),
+                            count = 0)
+
+num_diff_features[1, 2] <- sum(T1_to_T0.diff_table$pval < 0.05, na.rm = TRUE)
+num_diff_features[2, 2] <- sum(T2_to_T0.diff_table$pval < 0.05, na.rm = TRUE)
+num_diff_features[3, 2] <- sum(T3_to_T0.diff_table$pval < 0.05, na.rm = TRUE)
+
+num_diff_plot <- plot_col(num_diff_features, count, Comparison)
+num_diff_plot
+
+figure_file <- file.path(figures_dir, 'Num_diff_features.png')
+ggsave(figure_file, num_diff_plot, dpi = 300)
+
+```
+
+## 4.2 Volcano plots
+
+```{r}
+
+lfc.t <- 1
+pval.t <- 0.05
+
+T1_to_T0_volcano <- plot_volcano(T1_to_T0.diff_table, log2FC, pval, lfc.t, pval.t) +
+  labs(subtitle = 'T1 vs T0')
+T1_to_T0_volcano
+
+figure_file <- file.path(figures_dir, 'T1_T0_volcano.png')
+ggsave(figure_file, T1_to_T0_volcano, dpi = 300)
+
+
+T2_to_T0_volcano <- plot_volcano(T2_to_T0.diff_table, log2FC, pval, lfc.t, pval.t) +
+  labs(subtitle = 'T2 vs T0')
+T2_to_T0_volcano
+
+figure_file <- file.path(figures_dir, 'T2_T0_volcano.png')
+ggsave(figure_file, T2_to_T0_volcano, dpi = 300)
+
+T3_to_T0_volcano <- plot_volcano(T3_to_T0.diff_table, log2FC, pval, lfc.t, pval.t) +
+  labs(subtitle = 'T3 vs T0')
+T3_to_T0_volcano
+
+figure_file <- file.path(figures_dir, 'T3_T0_volcano.png')
+ggsave(figure_file, T3_to_T0_volcano, dpi = 300)
+```
+
+## 4.3 Hierarchical clustering analysis using heatmaps
+
+Normalized AUC for all features
+
+```{r}
+
+# Set sampleID as row.names to annotate heatmap
+
+colData <- column_to_rownames(metadata, var = 'SampleID') 
+mapcolor <- colorRampPalette(brewer.pal(11, 'RdYlBu'))(100)[100:1]
+
+figure_file <- file.path(figures_dir, 'All_features_HTMP.png')
+
+png(figure_file)
+pheatmap(norm.matrix,
+         clustering_distance_rows = 'correlation',
+         clustering_distance_cols = 'correlation',
+         scale = 'row',
+         annotation_col = colData,
+         color = mapcolor,
+         show_rownames = FALSE,
+         cutree_cols = 4,
+         main = 'Heatmap normalized AUC (all detected features)'
+         )
+dev.off()
+
+```
+
+Most differentially expressed features
+
+```{r}
+
+# Extract significant features of each comparison
+
+sig.features <- c(T1_to_T0.diff_table$FeatureID[T1_to_T0.diff_table$log2FC > 1 & T1_to_T0.diff_table$pval < 0.05],
+                  T2_to_T0.diff_table$FeatureID[T2_to_T0.diff_table$log2FC > 1 & T2_to_T0.diff_table$pval < 0.05],
+                  T3_to_T0.diff_table$FeatureID[T1_to_T0.diff_table$log2FC > 1 & T3_to_T0.diff_table$pval < 0.05])
+
+sig.features <- unique(sig.features)
+
+sig.features_table <- norm.matrix[row.names(norm.matrix) %in% sig.features, ]
+sig.features_table <- as.matrix(sig.features_table)
+
+figure_file <- file.path(figures_dir, 'DE_features_HTMP.png')
+
+png(figure_file)
+pheatmap(sig.features_table,
+         clustering_distance_rows = 'correlation',
+         clustering_distance_cols = 'correlation',
+         scale = 'row',
+         annotation_col = colData,
+         color = mapcolor,
+         cutree_cols = 4,
+         main = 'Heatmap normalized AUC (Differentialy expressed)'
+         )
+dev.off()
+
+```
+
+Log2FC for all the comparisons
+
+```{r}
+
+# Extract log2FC of all the studied comparisons
+
+log2fc.table <- data.frame(cbind(T1_to_T0.diff_table$log2FC, T2_to_T0.diff_table$log2FC, T3_to_T0.diff_table$log2FC))
+colnames(log2fc.table) <- c('T1_to_T0', 'T2_to_T0', 'T3_to_T0')
+rownames(log2fc.table) <- row.names(norm.matrix)
+
+# Removing rows with NA and Inf values
+log2fc.table <- drop_na(log2fc.table)
+log2fc.table <- log2fc.table[is.finite(rowSums(log2fc.table)),]
+
+log2fc.table <- as.matrix(log2fc.table)
+
+figure_file <- file.path(figures_dir, 'log2FC_HTMP.png')
+png(figure_file)
+pheatmap(log2fc.table,
+         clustering_distance_rows = 'correlation',
+         clustering_distance_cols = 'correlation',
+         show_rownames = FALSE,
+         color = mapcolor,
+         main = 'Heatmap log2FC (all features)'
+         )
+dev.off()
+
+```
+
+
