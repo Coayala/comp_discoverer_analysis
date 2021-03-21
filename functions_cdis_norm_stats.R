@@ -7,7 +7,7 @@
 ## The following normalization functions were adapted from the NormalyzerDe
 ## package at https://github.com/ComputationalProteomics/NormalyzerDE/blob/master/R/normMethods.R
 # -------------------------------------------------------------------------
-global.norm <- function(matrix){
+global.norm <- function(matrix, transform_data = TRUE){
   # This function will perform normalization based in the global AUC of each sample
   # and the median of such intensities across samples
   
@@ -17,13 +17,18 @@ global.norm <- function(matrix){
   for(col in 1:ncol(matrix)){
     norm.matrix[,col] <- (matrix[,col] / colsum[col]) * colsum.median
   }
-  norm.matrix <- log10(norm.matrix + 1)
+  colnames(norm.matrix) <- colnames(matrix)
+  rownames(norm.matrix) <- rownames(matrix)
+  if(transform_data == TRUE){
+    norm.matrix <- log10(norm.matrix + 1)
+  }
+  
   return(norm.matrix)
 }
 
 
 # -------------------------------------------------------------------------
-median.norm <- function(matrix){
+median.norm <- function(matrix, transform_data = TRUE){
   # This function will perform data normalization based in the  median AUC of each sample
   
   colmedian <- apply(matrix, 2, FUN = median, na.rm = TRUE)
@@ -32,12 +37,16 @@ median.norm <- function(matrix){
   for(col in 1:ncol(matrix)){
     norm.matrix[,col] <- (matrix[,col] / colmedian[col]) * colmedian.mean
   }
-  norm.matrix <- log10(norm.matrix + 1)
+  colnames(norm.matrix) <- colnames(matrix)
+  rownames(norm.matrix) <- rownames(matrix)
+  if(transform_data == TRUE){
+    norm.matrix <- log10(norm.matrix + 1)
+  }
   return(norm.matrix)
 } 
 
 # -------------------------------------------------------------------------
-mean.norm <- function(matrix){
+mean.norm <- function(matrix, transform_data = TRUE){
   # This function will perform data normalization based in the  mean AUC of each sample
   
   colmean <- colMeans(matrix, na.rm = TRUE)
@@ -46,7 +55,11 @@ mean.norm <- function(matrix){
   for(col in 1:ncol(matrix)){
     norm.matrix[,col] <- (matrix[,col] / colmean[col]) * colmean.mean
   }
-  norm.matrix <- log10(norm.matrix + 1)
+  colnames(norm.matrix) <- colnames(matrix)
+  rownames(norm.matrix) <- rownames(matrix)
+  if(transform_data == TRUE){
+    norm.matrix <- log10(norm.matrix + 1)
+  }
   return(norm.matrix)
 } 
 
@@ -65,6 +78,7 @@ cycloess.norm <- function(matrix){
     norm.matrix <- log2(matrix)
     norm.matrix <- limma::normalizeCyclicLoess(norm.matrix, method = 'fast')
     norm.matrix <- as.data.frame(norm.matrix)
+    rownames(norm.matrix) <- rownames(matrix)
     return(norm.matrix)
 }
 
@@ -92,7 +106,8 @@ normalize_by_all <- function(df){
   gi_norm.df <- global.norm(df)
   gi_norm.df <- gather(gi_norm.df, key = 'SampleID', value = 'AUC')
   gi_norm.plot <- plot_boxplot(gi_norm.df, SampleID, AUC) +
-    labs(title = 'Normalization by global AUC') +
+    labs(title = 'Normalization by global AUC',
+         y =  'Normalized AUC') +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           axis.title.x = element_blank())
   
@@ -100,7 +115,8 @@ normalize_by_all <- function(df){
   mean_norm.df <- mean.norm(df)
   mean_norm.df <- gather(mean_norm.df, key = 'SampleID', value = 'AUC')
   mean_norm.plot <- plot_boxplot(mean_norm.df, SampleID, AUC) +
-    labs(title = 'Normalization by mean') +
+    labs(title = 'Normalization by mean',
+         y =  'Normalized AUC') +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           axis.title.x = element_blank())
   
@@ -108,7 +124,8 @@ normalize_by_all <- function(df){
   median_norm.df <- median.norm(df)
   median_norm.df <- gather(median_norm.df, key = 'SampleID', value = 'AUC')
   median_norm.plot <- plot_boxplot(median_norm.df, SampleID, AUC) +
-    labs(title = 'Normalization by median') +
+    labs(title = 'Normalization by median',
+         y =  'Normalized AUC') +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           axis.title.x = element_blank())
   
@@ -116,7 +133,8 @@ normalize_by_all <- function(df){
   vsn_norm.df <- vsn.norm(df)
   vsn_norm.df <- gather(vsn_norm.df, key = 'SampleID', value = 'AUC')
   vsn_norm.plot <- plot_boxplot(vsn_norm.df, SampleID, AUC) +
-    labs(title = 'VSN') +
+    labs(title = 'VSN',
+         y =  'Normalized AUC') +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           axis.title.x = element_blank())
   
@@ -124,7 +142,8 @@ normalize_by_all <- function(df){
   cycloess_norm.df <- cycloess.norm(df)
   cycloess_norm.df <- gather(cycloess_norm.df, key = 'SampleID', value = 'AUC')
   cycloess_norm.plot <- plot_boxplot(cycloess_norm.df, SampleID, AUC) +
-    labs(title = 'LOESS normalization') +
+    labs(title = 'LOESS normalization',
+         y =  'Normalized AUC') +
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           axis.title.x = element_blank())
   
@@ -151,4 +170,31 @@ plot_nmds <- function(df, color_by, shape_by = NULL){
     theme(plot.title = element_text(face = 'bold', hjust = 0.5))
   
   
+}
+
+#---------------------------------------------------------------------------
+plot_cumvar <- function(eigen){
+  dimensions <- c(1:dim(eigen)[1])
+  cumvar <- ggplot(data=eigen, aes(x=as.factor(dimensions), y=cumulative.variance.percent/100, group=1)) +
+    geom_line(size=1.2, color='black') +
+    geom_point(size=3, color='black') +
+    xlab('PC axes') + ylab('Amount of explained variance') +
+    theme_bw() +
+    theme(plot.title = element_text(face="bold", hjust = 0.5)) +
+    labs(title = 'Cumulative variance plot')
+  return(cumvar)
+}
+
+#---------------------------------------------------------------------------
+
+plot_dotplot <- function(df, my_x, my_y, color_by, shape_by = NULL){
+  ggplot(df,
+         aes(x = {{my_x}},
+             y = {{my_y}})) +
+    geom_point(aes(color = {{color_by}},
+                   shape = {{shape_by}}),
+               size = 3) +
+    scale_color_jama()  +
+    theme_bw() +
+    theme(plot.title = element_text(face = 'bold', hjust = 0.5))
 }

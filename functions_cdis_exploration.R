@@ -205,7 +205,7 @@ plot_vank <- function(df, color_by, facet_by = NULL, facet_by2 = NULL){
              y = H_to_C,
              color = {{color_by}})) +
     geom_point(size = 2) +
-    scale_color_jco() +
+    scale_color_igv() +
     theme_bw() +
     labs(title = 'Van Krevelen Diagram',
          x = 'O/C',
@@ -218,14 +218,15 @@ plot_vank <- function(df, color_by, facet_by = NULL, facet_by2 = NULL){
 }
 
 # -------------------------------------------------------------------------
-plot_col <- function(df, my_x, my_y, color_by1, color_by2){
+plot_col <- function(df, my_x, my_y, color_by1, color_by2, dodge = FALSE){
   ggplot(df,
          aes(x = {{my_x}},
              y = {{my_y}})) +
     geom_col(aes(fill = {{color_by1}},
                  color = {{color_by2}}),
              size = 2,
-             width = 0.75) +
+             width = 0.75,
+             position = ifelse(dodge == TRUE, 'dodge', 'stack')) +
     scale_fill_jco() +
     scale_color_jama() +
     theme_bw() +
