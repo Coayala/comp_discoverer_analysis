@@ -1,0 +1,64 @@
+---
+title: "KEGG identifiers"
+author: "Christian Ayala"
+date: "3/19/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# 1. Importing Libraries
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(readxl)
+```
+
+# 2. Set path variables and import data
+
+```{r set_path, message=FALSE, warning=FALSE}
+# set path variables
+project_dir <- getwd()
+project_name <- 'Bog_1e5_label'
+figures_dir <- file.path(project_dir, paste0(project_name, '_output_figures'))
+tables_dir <- file.path(project_dir,  paste0(project_name, '_output_tables'))
+```
+
+```{r}
+kegg_res_file <- file.path(tables_dir, 'KEGG_results.xlsx')
+kegg_res <- read_xlsx(kegg_res_file)
+
+table_file <- file.path(tables_dir, 'Diff_expressed_T1.csv')
+T1_to_T0.diff_table <- read_csv(table_file)
+table_file <- file.path(tables_dir, 'Diff_expressed_T2.csv')
+T2_to_T0.diff_table <- read_csv(table_file)
+table_file <- file.path(tables_dir, 'Diff_expressed_T3.csv')
+T3_to_T0.diff_table <- read_csv(table_file)
+```
+
+# 3. Merge KEGG annotations
+
+```{r}
+# This step includes filtering for significant DE metabolites (pval.adj < 0.05)
+T1_to_T0.K_ID <- mz_res %>% 
+  select(`KEGG ID`, Name) %>% 
+  right_join(T1_to_T0.diff_table, by = 'Name') %>% 
+  filter(pval.adj < 0.05)
+
+T2_to_T0.K_ID <- mz_res %>% 
+  select(`KEGG ID`, Name) %>% 
+  right_join(T2_to_T0.diff_table, by = 'Name') %>% 
+  filter(pval.adj < 0.05) %>% 
+  filter(!is.na(`KEGG ID`))
+
+T3_to_T0.K_ID <- mz_res %>% 
+  select(`KEGG ID`, Name) %>% 
+  right_join(T3_to_T0.diff_table, by = 'Name') %>% 
+  filter(pval.adj < 0.05) %>% 
+  filter(!is.na(`KEGG ID`))
+```
+
+
+
+
+
