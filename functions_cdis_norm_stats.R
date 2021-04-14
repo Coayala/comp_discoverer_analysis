@@ -164,7 +164,7 @@ plot_nmds <- function(df, color_by, shape_by = NULL){
              y = NMDS2,
              color = {{color_by}},
              shape = {{shape_by}})) +
-    geom_point(size = 3) +
+    geom_jitter(size = 3) +
     scale_color_jama() +
     theme_bw() +
     theme(plot.title = element_text(face = 'bold', hjust = 0.5))
