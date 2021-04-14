@@ -75,14 +75,15 @@ get_diff_table_no_pval <- function(auc_matrix, control.sample_list, treatment.sa
 }
 
 # -------------------------------------------------------------------------
-plot_col <- function(df, my_x, my_y, color_by1, color_by2 = NULL){
+plot_col <- function(df, my_x, my_y, color_by1, color_by2, dodge = FALSE){
   ggplot(df,
          aes(x = {{my_x}},
              y = {{my_y}})) +
     geom_col(aes(fill = {{color_by1}},
                  color = {{color_by2}}),
              size = 2,
-             width = 0.75) +
+             width = 0.75,
+             position = ifelse(dodge == TRUE, 'dodge', 'stack')) +
     scale_fill_jco() +
     scale_color_jama() +
     theme_bw() +
@@ -98,7 +99,7 @@ plot_volcano <- function(df, log2FC, pval, log2FC.threshold, pval.threshold){
          aes(x = {{log2FC}},
              y = -log10({{pval}}))) +
     geom_point(color = ifelse(abs(df$log2FC) > {{log2FC.threshold}} & 
-                                -log10(df$pval) > -log10({{pval.threshold}}), "#FF0000", "#000000")) +
+                                -log10(df$pval.adj) > -log10({{pval.threshold}}), "#FF0000", "#000000")) +
     geom_vline(xintercept = c(-{{log2FC.threshold}}, {{log2FC.threshold}}),
                linetype = 'dotted',
                size = 1,
@@ -109,8 +110,11 @@ plot_volcano <- function(df, log2FC, pval, log2FC.threshold, pval.threshold){
                color = 'blue') +
     geom_text_repel(data = . %>%
                       mutate(label = ifelse(abs(df$log2FC) > log2FC.threshold &
-                                              -log10(df$pval) > -log10(pval.threshold), FeatureID, NA)),
-                    aes(label = label)) +
+                                              -log10(df$pval.adj) > -log10(pval.threshold), name4plot, NA)),
+                    aes(label = label),
+                    size = 3,
+                    max.overlaps = 20,
+                    force = 2) +
     theme_bw() +
     labs(title = 'Volcano plot', 
          x = expression("Log"[2]*" Fold Change"), 
@@ -121,4 +125,46 @@ plot_volcano <- function(df, log2FC, pval, log2FC.threshold, pval.threshold){
           plot.subtitle = element_text(hjust = 0.5, 
                                        face = 'bold', 
                                        size = 15))
+}
+
+# -------------------------------------------------------------------------
+plot_venn <- function(my_list, my_colors){
+  venn(my_list,
+       zcolor = {{my_colors}},
+       ilcs = 1,
+       sncs = 1)
+}
+
+# -------------------------------------------------------------------------
+plot_vank <- function(df, color_by, facet_by = NULL, facet_by2 = NULL){
+  ggplot(df,
+         aes(x = O_to_C,
+             y = H_to_C,
+             color = {{color_by}})) +
+    geom_point(size = 2) +
+    scale_color_igv() +
+    theme_bw() +
+    labs(title = 'Van Krevelen Diagram',
+         x = 'O/C',
+         y = 'H/C') +
+    theme(plot.title = element_text(face = 'bold',
+                                    hjust = 0.5)) +
+    facet_grid(rows = vars({{facet_by}}),
+               cols = vars({{facet_by2}}))
+  
+}
+
+# -------------------------------------------------------------------------
+plot_boxplot <- function(df, my_x, my_y, color_by, my_comparisons = NULL){
+  ggplot(df,
+         aes(x = {{my_x}},
+             y = {{my_y}},
+             fill = {{color_by}})) +
+    geom_boxplot() +
+    scale_fill_jama() +
+    stat_compare_means(comparisons = {{my_comparisons}},
+                       method = 't.test',
+                       label = 'p.signif') +
+    theme_bw() +
+    theme(plot.title = element_text(face = 'bold', hjust = 0.5))
 }
