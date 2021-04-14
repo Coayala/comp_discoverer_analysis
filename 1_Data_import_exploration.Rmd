@@ -12,7 +12,7 @@ editor_options:
 
 # 1. Importing Libraries
 
-```{r libraries, message=FALSE}
+```{r libraries, message=FALSE, warning=FALSE}
 library(tidyverse)
 library(readxl)
 library(ggpubr)
@@ -29,7 +29,7 @@ source('functions_cdis_exploration.R')
 project_dir <- getwd()
 
 # Give a name for your project so the results are all grouped together in a directory with the same name
-project_name <- 'Bog_lbl_unlbl_1.7int'
+project_name <- 'Bog_1e5_label'
 figures_dir <- file.path(project_dir, paste0(project_name, '_output_figures'))
 tables_dir <- file.path(project_dir,  paste0(project_name, '_output_tables'))
 
@@ -39,13 +39,22 @@ dir.create(figures_dir, showWarnings = FALSE)
 dir.create(tables_dir, showWarnings = FALSE)
 ```
 
+Set if the data to be used is going to be labeled or unlabeled
+
+```{r}
+# Flag for labeled / unlabeled data, set TRUE or FALSE
+
+label = TRUE
+```
+
+
 The data for in this script is the **Compounds table** table exported from **Compound Discoverer**. For this script to work well please add the **Area** columns to this table, and the **Gap Status**.
 The **metadata table** can be exported directly from the **Samples tab** in **Compound Discoverer** by copying to a blank text file.
 
 
 ```{r import_data, message=FALSE}
 # Import data tables
-cd_results_file <- file.path(project_dir, 'data', 'Bog_lbl_unlbl_1.7int.xlsx')
+cd_results_file <- file.path(project_dir, 'data', 'Bog_lbl_unlbl_1e5_formula.xlsx')
 cd_results_table <- read_xlsx(cd_results_file)
 
 # Select columns needed for downstream analysis
@@ -54,7 +63,14 @@ cd_results_table <- cd_results_table %>%
   arrange(desc(`Molecular Weight`)) %>% 
   mutate(FeatureID = paste0('Feature',formatC(n():0001, width = 4, flag = '0'))) %>%
   select(FeatureID, Name, Formula, `Molecular Weight`, contains('Annotation source'), contains('Results'), contains('Pathways'), 
-         `mzCloud Best Match`, contains('Area:'), contains('Gap Status:'))
+         contains('Area:'), contains('Gap Status:')) %>% 
+  # Differentiate between features that share the same name using "peak#" at the end of the name
+  group_by(Name) %>% 
+  add_count(Name) %>% 
+  # Create variable with names for plotting (useful in following scripts)
+  mutate(name4plot = ifelse(is.na(Name), FeatureID, ifelse(n == 1, Name, paste0(Name, '-peak', n():1)))) %>% 
+  select(-n) %>% 
+  ungroup()
 
 # Import metadata and fix names
 metadata_file <- file.path(project_dir, 'data', 'metadata.tsv')
@@ -76,7 +92,7 @@ write_csv(metadata, table_file)
 
 # 3. Data Manipulation and thermodynamic indices calculations
 
-```{r data, message=FALSE}
+```{r data, message=FALSE, warning=FALSE}
 
 # Split formula column into elemental counts
 cd_results_table <- separate_formula(cd_results_table)
@@ -108,17 +124,18 @@ write_csv(compounds_table, table_file)
 ```{r}
 
 # Gather "Gap Status" for filtering 
-
-gap_status <- cd_results_table %>% 
-  select(FeatureID, contains('Gap Status:')) %>% 
-  gather(contains('Gap Status:'), key = 'SampleID', value = 'gap_status')
-gap_status$SampleID <- str_remove(gap_status$SampleID, 'Gap Status: Saleska_')
-gap_status$SampleID <- str_remove(gap_status$SampleID, '_23.*')
-
-## Filtering
-
-compounds_table <- left_join(compounds_table, gap_status, by = c('FeatureID', 'SampleID')) %>% 
-  filter(gap_status != 'Full gap')
+if(label == FALSE){
+  gap_status <- cd_results_table %>% 
+    select(FeatureID, contains('Gap Status:')) %>% 
+    gather(contains('Gap Status:'), key = 'SampleID', value = 'gap_status')
+  gap_status$SampleID <- str_remove(gap_status$SampleID, 'Gap Status: Saleska_')
+  gap_status$SampleID <- str_remove(gap_status$SampleID, '_23.*')
+  
+  ## Filtering
+  
+  compounds_table <- left_join(compounds_table, gap_status, by = c('FeatureID', 'SampleID')) %>% 
+    filter(gap_status != 'Full gap')
+}
 
 ```
 
@@ -217,35 +234,7 @@ dev.off()
 venn_time <- plot_venn(my_list, my_colors)
 ```
 
-By label or unlabeled
-
-```{r venn_type, message=FALSE}
-# Venn diagram of the compounds present in each time
-label_list <- compounds_table %>% 
-  filter(Label == 'Labeled') %>% 
-  select(FeatureID) %>% 
-  distinct()
-
-nonlabel_list <- compounds_table %>% 
-  filter(Label == 'Sample') %>% 
-  select(FeatureID) %>% 
-  distinct()
-
-my_list <- list(Labeled = label_list$FeatureID,
-                Non_labeled = nonlabel_list$FeatureID)
-
-my_colors <- c('red', 'blue')
-
-figure_file <- file.path(figures_dir, 'venn_type.png')
-png(figure_file)
-venn_time <- plot_venn(my_list, my_colors)
-dev.off()
-
-venn_time <- plot_venn(my_list, my_colors)
-```
-
 ## 4.3 KEGG Pathways
-
 
 ```{r}
 # Top KEGG pathways identified
@@ -278,6 +267,8 @@ metabolika <- compounds_table %>%
   count(`Metabolika Pathways`) %>% 
   drop_na(`Metabolika Pathways`)
 
+metabolika$`Metabolika Pathways` <- str_remove(metabolika$`Metabolika Pathways`, '\\(.*\\)')
+
 metabolika_plot <- plot_col(metabolika, n, `Metabolika Pathways`, Time, dodge = TRUE) +
   facet_wrap(~ Label)
 metabolika_plot
@@ -297,7 +288,7 @@ Van Krevelen diagrams faceted by different parameters
 ```{r vank_plot_time, message=FALSE}
 
 # Ven Krevelen Diagram based on time
-vank_time <- plot_vank(compounds_table, Class, Time, Label)
+vank_time <- plot_vank(compounds_table, Class, Time)
 vank_time
 
 figure_file <- file.path(figures_dir, 'Venk_diagram_time.jpg')
@@ -308,15 +299,13 @@ ggsave(figure_file, vank_time, dpi = 300)
 ```{r vank_material, message=FALSE}
 
 # Ven Krevelen Diagram based on type of organic material
-vank_material <- plot_vank(compounds_table, Class, Material, Label)
+vank_material <- plot_vank(compounds_table, Class, Material)
 vank_material
 
 figure_file <- file.path(figures_dir, 'Venk_diagram_material.jpg')
 ggsave(figure_file, vank_material, dpi = 300)
 
 ```
-
-
 
 ## 6.1 Gibbs Free Energy (GFE) exploratory plots
 
@@ -329,8 +318,7 @@ my_comparisons <- list(c('T0', 'T1'), c('T0', 'T2'), c('T0', 'T3'))
 
 gfe_time <- plot_boxplot(compounds_table, Time, GFE, Time, my_comparisons) +
   labs(title = 'Gibbs Free Energy') +
-  facet_wrap(~ Label)
-
+  facet_wrap(~Label)
 gfe_time
 
 figure_file <- file.path(figures_dir, 'gfe_time.png')
