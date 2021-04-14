@@ -59,6 +59,12 @@ compounds_table <- read_csv(compounds_table_file)
 metadata_file <- file.path(tables_dir, 'fixed_metadata.csv')
 metadata <- read_csv(metadata_file)
 
+# Import NMR data
+nmr_file <- file.path(project_dir, 'data', 'Saleska_BOG_concentrations_ALL.xlsx')
+nmr_table <- read_xlsx(nmr_file, skip = 4)
+colnames(nmr_table) <- str_remove(colnames(nmr_table), '_1D.*')
+colnames(nmr_table)[1] <- 'Name'
+
 ```
 
 # 3. Calculate ratios and log2fold-change
@@ -98,21 +104,7 @@ Merge differentially expressed features with the annotation
 T1_to_T0.diff_table <- compounds_table %>% 
   select(-contains('Annotation Source:'), - contains('Results'), -SampleID, -AUC, -Label, -Material, - Time) %>% 
   right_join(T1_to_T0.diff_table, by = 'FeatureID') %>% 
-  distinct()
-
-T2_to_T0.diff_table <- compounds_table %>% 
-  select(-contains('Annotation Source:'), - contains('Results'), -SampleID, -AUC, -Label, -Material, - Time) %>%
-  right_join(T2_to_T0.diff_table, by = 'FeatureID') %>% 
-  distinct()
-
-T3_to_T0.diff_table <- compounds_table %>% 
-  select(-contains('Annotation Source:'), - contains('Results'), -SampleID, -AUC, -Label, -Material, - Time) %>% 
-  right_join(T3_to_T0.diff_table, by = 'FeatureID') %>% 
-  distinct()
-
-# Categorize features whether they are up- or downregulated
-
-T1_to_T0.diff_table <- T1_to_T0.diff_table %>% 
+  distinct() %>% 
   filter(!is.nan(log2FC)) %>% 
   mutate(Comment = case_when(log2FC == Inf ~ 'Not present in control',
                              log2FC == -Inf ~ 'Only present in control',
@@ -125,7 +117,10 @@ T1_to_T0.diff_table$Comment <- factor(T1_to_T0.diff_table$Comment,
 table_file <- file.path(tables_dir, 'Diff_expressed_T1.csv')
 write_csv(T1_to_T0.diff_table, table_file )
 
-T2_to_T0.diff_table <- T2_to_T0.diff_table %>% 
+T2_to_T0.diff_table <- compounds_table %>% 
+  select(-contains('Annotation Source:'), - contains('Results'), -SampleID, -AUC, -Label, -Material, - Time) %>%
+  right_join(T2_to_T0.diff_table, by = 'FeatureID') %>% 
+  distinct() %>% 
   filter(!is.nan(log2FC)) %>% 
   mutate(Comment = case_when(log2FC == Inf ~ 'Not present in control',
                              log2FC == -Inf ~ 'Only present in control',
@@ -138,7 +133,10 @@ T2_to_T0.diff_table$Comment <- factor(T2_to_T0.diff_table$Comment,
 table_file <- file.path(tables_dir, 'Diff_expressed_T2.csv')
 write_csv(T2_to_T0.diff_table, table_file )
 
-T3_to_T0.diff_table <- T3_to_T0.diff_table %>% 
+T3_to_T0.diff_table <- compounds_table %>% 
+  select(-contains('Annotation Source:'), - contains('Results'), -SampleID, -AUC, -Label, -Material, - Time) %>% 
+  right_join(T3_to_T0.diff_table, by = 'FeatureID') %>% 
+  distinct() %>% 
   filter(!is.nan(log2FC)) %>% 
   mutate(Comment = case_when(log2FC == Inf ~ 'Not present in control',
                              log2FC == -Inf ~ 'Only present in control',
@@ -150,6 +148,7 @@ T3_to_T0.diff_table$Comment <- factor(T3_to_T0.diff_table$Comment,
 
 table_file <- file.path(tables_dir, 'Diff_expressed_T3.csv')
 write_csv(T3_to_T0.diff_table, table_file )
+
 ```
 
 Extract most differentially expressed features
@@ -222,7 +221,7 @@ figure_file <- file.path(figures_dir, 'T3_T0_volcano.png')
 ggsave(figure_file, T3_to_T0_volcano, dpi = 300)
 ```
 
-## 4.3 Hierarchical clustering analysis using heatmaps
+# 5. Hierarchical clustering analysis using heatmaps
 
 Multiple heatmaps will be plotted, based on the differential expression and if the compounds were or not assigned and structure
 
@@ -235,22 +234,22 @@ dev.off()
 
 # Set sampleID as row.names to annotate heatmap
 
-colData <- column_to_rownames(metadata, var = 'SampleID') 
+col_annot <- column_to_rownames(metadata, var = 'SampleID') 
 mapcolor <- colorRampPalette(brewer.pal(11, 'RdYlBu'))(100)[100:1]
 
 figure_file <- file.path(figures_dir, 'All_features_heatmap.pdf')
 
 annot_colors <- list(
   Time = c(T0 ='#0073C2FF', T1 = '#EFC000FF', T2 = '#868686FF', T3 = '#CD534CFF'),
-  Material = c(Litter = 'green4', Litter_Peat = 'chocolate4')
-)
+  Material = c(Litter = 'green4', Litter_Peat = 'chocolate4'),
+  Origin = c(LC_MS2 = '#0086cb', NMR = '#d23936'))
 
 pdf(figure_file)
 pheatmap(norm.matrix,
          clustering_distance_rows = 'correlation',
          clustering_distance_cols = 'correlation',
          scale = 'row',
-         annotation_col = colData,
+         annotation_col = col_annot,
          annotation_colors = annot_colors,
          color = mapcolor,
          show_rownames = FALSE,
@@ -287,7 +286,7 @@ pheatmap(named_compounds.matrix,
          clustering_distance_rows = 'correlation',
          clustering_distance_cols = 'correlation',
          scale = 'row',
-         annotation_col = colData,
+         annotation_col = col_annot,
          annotation_colors = annot_colors,
          color = mapcolor,
          cutree_cols = 4,
@@ -319,7 +318,7 @@ pheatmap(sig_features.matrix,
          clustering_distance_rows = 'correlation',
          clustering_distance_cols = 'correlation',
          scale = 'row',
-         annotation_col = colData,
+         annotation_col = col_annot,
          annotation_colors = annot_colors,
          color = mapcolor,
          cutree_cols = 4,
@@ -344,7 +343,7 @@ pheatmap(named_sig_features.matrix,
          clustering_distance_rows = 'correlation',
          clustering_distance_cols = 'correlation',
          scale = 'row',
-         annotation_col = colData,
+         annotation_col = col_annot,
          annotation_colors = annot_colors,
          color = mapcolor,
          cutree_cols = 4,
@@ -355,3 +354,133 @@ dev.off()
 ```
 
 [Scaled Area under the curve (AUC) heatmap for identified dysregulated features](`r toString(figure_file)`)
+
+# 6. Hierarchical clustering analysis with added NMR data
+
+## 6.1 Differential analysis of NMR data
+
+```{r}
+
+# Create a matrix with NMR data
+nmr.matrix <- nmr_table %>% 
+  column_to_rownames(var = 'Name') %>% 
+  select(metadata$SampleID)
+
+# The following function will calculate ratio, log2FC, p values and adjusted pvalues. If no replicates are available for EACH treatment
+# please use the get_diff_table_no_pval() function
+
+T1_to_T0.nmr <- get_diff_table(nmr.matrix, control.sample_list = T0.samples, treatment.sample_list = T1.samples)
+T2_to_T0.nmr <- get_diff_table(nmr.matrix, control.sample_list = T0.samples, treatment.sample_list = T2.samples)
+T3_to_T0.nmr <- get_diff_table(nmr.matrix, control.sample_list = T0.samples, treatment.sample_list = T3.samples)
+
+```
+
+
+```{r}
+# Join differential NMR data with NMR table
+T1_to_T0.nmr <- nmr_table %>%
+  select(Name, `KEGG Compound ID`, Formula, Weight, InChI) %>% 
+  right_join(T1_to_T0.nmr, by = c('Name' = 'FeatureID')) %>% 
+  filter(!is.nan(log2FC)) %>% 
+  mutate(Comment = case_when(log2FC == Inf ~ 'Not present in control',
+                             log2FC == -Inf ~ 'Only present in control',
+                             log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+T1_to_T0.nmr$Comment <- factor(T1_to_T0.nmr$Comment, 
+                               levels = c('Only present in control', 'Downregulated', 'Upregulated', 'Not present in control' ))
+
+table_file <- file.path(tables_dir, 'Diff_expressed_NMR_T1.csv')
+write_csv(T1_to_T0.nmr, table_file )
+
+T2_to_T0.nmr <- nmr_table %>%
+  select(Name, `KEGG Compound ID`, Formula, Weight, InChI) %>% 
+  right_join(T2_to_T0.nmr, by = c('Name' = 'FeatureID')) %>% 
+  filter(!is.nan(log2FC)) %>% 
+  mutate(Comment = case_when(log2FC == Inf ~ 'Not present in control',
+                             log2FC == -Inf ~ 'Only present in control',
+                             log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+T2_to_T0.nmr$Comment <- factor(T2_to_T0.nmr$Comment, 
+                               levels = c('Only present in control', 'Downregulated', 'Upregulated', 'Not present in control' ))
+
+table_file <- file.path(tables_dir, 'Diff_expressed_NMR_T2.csv')
+write_csv(T2_to_T0.nmr, table_file )
+
+T3_to_T0.nmr <- nmr_table %>%
+  select(Name, `KEGG Compound ID`, Formula, Weight, InChI) %>% 
+  right_join(T3_to_T0.nmr, by = c('Name' = 'FeatureID')) %>% 
+  filter(!is.nan(log2FC)) %>% 
+  mutate(Comment = case_when(log2FC == Inf ~ 'Not present in control',
+                             log2FC == -Inf ~ 'Only present in control',
+                             log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+T3_to_T0.nmr$Comment <- factor(T3_to_T0.nmr$Comment, 
+                               levels = c('Only present in control', 'Downregulated', 'Upregulated', 'Not present in control' ))
+
+table_file <- file.path(tables_dir, 'Diff_expressed_NMR_T3.csv')
+write_csv(T3_to_T0.nmr, table_file )
+```
+
+## 6.2 Heatmaps including NMR data
+
+```{r}
+# Join NMR data with dysregulated LC data
+sig_nmr.matrix <- rbind(sig_features.matrix, nmr.matrix)
+```
+
+```{r}
+
+row_annot <- tibble(Name = row.names(sig_nmr.matrix)) %>% 
+  mutate(Origin = ifelse(Name %in% row.names(nmr.matrix), 'NMR', 'LC_MS2')) %>% 
+  column_to_rownames(var = 'Name')
+
+figure_file <- file.path(figures_dir, 'Dysreg_features_and_NMR.pdf')
+dev.off()
+pdf(figure_file, width = 15, height = 15)
+pheatmap(sig_nmr.matrix,
+         clustering_distance_rows = 'correlation',
+         clustering_distance_cols = 'correlation',
+         scale = 'row',
+         annotation_col = col_annot,
+         annotation_row = row_annot,
+         annotation_colors = annot_colors,
+         color = mapcolor,
+         cutree_cols = 4,
+         cutree_rows = 5,
+         fontsize_row = 6,
+         main = 'Dysregulated features and NMR data'
+)
+dev.off()
+```
+
+[Dysregulated features and NMR data](`r toString(figure_file)`)
+
+```{r}
+# Join NMR data with dysregulated LC data
+named_sig_nmr.matrix <- rbind(named_sig_features.matrix, nmr.matrix)
+```
+
+```{r}
+figure_file <- file.path(figures_dir, 'Dysreg_identified_features_and_NMR.pdf')
+dev.off()
+pdf(figure_file, width = 15, height = 10)
+pheatmap(named_sig_nmr.matrix,
+         clustering_distance_rows = 'correlation',
+         clustering_distance_cols = 'correlation',
+         scale = 'row',
+         annotation_col = col_annot,
+         annotation_row = row_annot,
+         annotation_colors = annot_colors,
+         color = mapcolor,
+         cutree_cols = 4,
+         cutree_rows = 5,
+         fontsize_row = 6,
+         main = 'Identified dysregulated features and NMR data'
+)
+dev.off()
+```
+
+[Identified dysregulated features and NMR data](`r toString(figure_file)`)
