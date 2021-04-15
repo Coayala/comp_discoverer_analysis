@@ -16,6 +16,7 @@ library(ggsci)
 library(pheatmap)
 library(RColorBrewer)
 library(readxl)
+library(UpSetR)
 source('functions_cdis_diff.R')
 ```
 
@@ -188,7 +189,68 @@ num_diff_plot
 
 figure_file <- file.path(figures_dir, 'Num_diff_features.png')
 ggsave(figure_file, num_diff_plot, dpi = 300)
+```
 
+## 4.2 Dysregulated features shared at different timepoints
+
+An **upset plot** is used instead of a Venn Diagram asi it provides a better visualization of the number of figures that are being shared among groups
+
+```{r}
+# Filter diff tables by pval.adj
+
+T1.sig <- T1_to_T0.diff_table %>% 
+  filter(pval.adj < 0.05)
+T2.sig <- T2_to_T0.diff_table %>% 
+  filter(pval.adj < 0.05)
+T3.sig <- T3_to_T0.diff_table %>% 
+  filter(pval.adj < 0.05)
+
+# Get list of features at each time point for each of the cases
+T1.upregulated <- get_vectors(T1.sig, 'Comment', 'Upregulated', 'FeatureID')
+T1.downregulated <- get_vectors(T1.sig, 'Comment', 'Downregulated', 'FeatureID')
+T1.not_in_control <- get_vectors(T1.sig, 'Comment', 'Not present in control', 'FeatureID')
+T1.only_in_control <- get_vectors(T1.sig, 'Comment', 'Only present in control', 'FeatureID')
+
+T2.upregulated <- get_vectors(T2.sig, 'Comment', 'Upregulated', 'FeatureID')
+T2.downregulated <- get_vectors(T2.sig, 'Comment', 'Downregulated', 'FeatureID')
+T2.not_in_control <- get_vectors(T2.sig, 'Comment', 'Not present in control', 'FeatureID')
+T2.only_in_control <- get_vectors(T2.sig, 'Comment', 'Only present in control', 'FeatureID')
+
+T3.upregulated <- get_vectors(T3.sig, 'Comment', 'Upregulated', 'FeatureID')
+T3.downregulated <- get_vectors(T3.sig, 'Comment', 'Downregulated', 'FeatureID')
+T3.not_in_control <- get_vectors(T3.sig, 'Comment', 'Not present in control', 'FeatureID')
+T3.only_in_control <- get_vectors(T3.sig, 'Comment', 'Only present in control', 'FeatureID')
+```
+
+```{r fig.height=8}
+upset_input <- list(T1.upregulated = T1.upregulated,
+                    T1.downregulated = T1.downregulated,
+                    T1.not_in_control = T1.not_in_control,
+                    T1.only_in_control = T1.only_in_control,
+                    T2.upregulated = T2.upregulated,
+                    T2.downregulated = T2.downregulated,
+                    T2.not_in_control = T2.not_in_control,
+                    T2.only_in_control = T2.only_in_control,
+                    T3.upregulated = T3.upregulated,
+                    T3.downregulated = T3.downregulated,
+                    T3.not_in_control = T3.not_in_control,
+                    T3.only_in_control = T3.only_in_control)
+
+upset_metadata <- data.frame(sets = as.vector(names(upset_input)),
+                         Time = rep(c('T1', 'T2', 'T3'), each = 4))
+
+upset_features <- upset(fromList(upset_input), order.by = "freq", cutoff = 1, nsets = 12,
+                    mainbar.y.label = 'Number of shared features', sets.x.label = 'Number of features',
+                    text.scale = c(1.5, 1, 1.5, 1, 1.3, 1.3),
+                    set.metadata = list(data = upset_metadata, 
+                                        plots = list(list(type = 'matrix_rows', column = 'Time', 
+                                                          colors = c(T1 = '#EFC000FF', T2 = '#868686FF', T3 = '#CD534CFF')))))
+upset_features
+
+figure_file <- file.path(figures_dir, 'Upset-KEGG.png')
+png(figure_file, width = 800, height = 800)
+upset_features
+dev.off()
 ```
 
 ## 4.2 Volcano plots
@@ -220,6 +282,78 @@ T3_to_T0_volcano
 figure_file <- file.path(figures_dir, 'T3_T0_volcano.png')
 ggsave(figure_file, T3_to_T0_volcano, dpi = 300)
 ```
+
+## 4.3 Van Krevelen Diagrams of dysregulated features
+
+**Dysregulated features at T1**
+
+```{r}
+
+T1_vank <- plot_vank(T1.sig, Class, Comment)
+T1_vank
+
+figure_file <- file.path(figures_dir, 'DE_vank_T1.png')
+ggsave(figure_file, T1_vank)
+```
+
+**Dysregulated features at T2**
+
+```{r}
+T2_vank <- plot_vank(T2.sig, Class, Comment)
+T2_vank
+
+figure_file <- file.path(figures_dir, 'DE_vank_T2.png')
+ggsave(figure_file, T2_vank)
+```
+
+**Dysregulated features at T3**
+
+```{r}
+T3_vank <- plot_vank(T3.sig, Class, Comment)
+T3_vank
+
+figure_file <- file.path(figures_dir, 'DE_vank_T3.png')
+ggsave(figure_file, T3_vank)
+```
+
+## 4.4 GFE plots of dysregulated features
+
+**Dysregulated features at T1**
+
+```{r}
+
+my_colors = c('Not present in control' = '#d8365e', 
+              'Upregulated' = '#d34849',
+              'Downregulated' = '#005193',
+              'Only present in control' = '#4b70de')
+
+T1_GFE_box <- plot_boxplot(T1.sig, Comment, GFE, Comment, my_colors)
+T1_GFE_box
+
+figure_file <- file.path(figures_dir, 'DE_GFE_T1.png')
+ggsave(figure_file, T1_GFE_box)
+```
+
+**Dysregulated features at T2**
+
+```{r}
+T2_GFE_box <- plot_boxplot(T2.sig, Comment, GFE, Comment, my_colors)
+T2_GFE_box
+
+figure_file <- file.path(figures_dir, 'DE_GFE_T2.png')
+ggsave(figure_file, T2_GFE_box)
+```
+
+**Dysregulated features at T3**
+
+```{r}
+T3_GFE_box <- plot_boxplot(T3.sig, Comment, GFE, Comment, my_colors)
+T3_GFE_box
+
+figure_file <- file.path(figures_dir, 'DE_GFE_T3.png')
+ggsave(figure_file, T3_GFE_box)
+```
+
 
 # 5. Hierarchical clustering analysis using heatmaps
 

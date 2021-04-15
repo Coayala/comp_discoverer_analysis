@@ -1,7 +1,7 @@
 #
 #
 # Christian Ayala
-# Functions for Labeled_analysis.Rmd
+# Functions for 3_Differential_analysis.Rmd
 #
 #
 # -------------------------------------------------------------------------
@@ -16,6 +16,21 @@ get_samples <- function(metadata.df, Treatment, value){
   samples <- samples$SampleID
   
   return(samples)
+}
+
+# -------------------------------------------------------------------------
+get_vectors <- function(df, filter_by, value, get_col){
+  # Column where the value will be filtered
+  filter_col <- syms({{filter_by}})
+  
+  # Column that will be retrieved
+  get <- syms({{get_col}})
+  
+  vector <- df %>% 
+    filter((!!! filter_col) == value) %>% 
+    pull((!!! get))
+  
+  return(vector)
 }
 
 # -------------------------------------------------------------------------
@@ -36,19 +51,19 @@ get_diff_table <- function(auc_matrix, control.sample_list, treatment.sample_lis
     mutate(log2FC = log2(ratio)) # calculate log2FC
   
   # Initialize pvalues matrix
-  pvalues <- data.frame(row.names = rownames(norm.matrix), pval = rep(0, length(rownames(norm.matrix))))
-  
-  # Calculate pvalue per each of the features
+  pvalues <- data.frame(row.names = rownames(auc_matrix), pval = rep(0, length(rownames(auc_matrix))))
+
+  #Calculate pvalue per each of the features
   for(i in 1:nrow(pvalues)){
     t.test <- t.test(as.numeric(temp.df_control[i,]), as.numeric(temp.df_treatment[i,]), paired = FALSE)
     pvalues$pval[i] <- t.test$p.value
   }
-  
+
   diff_table <- merge(diff_table, pvalues, by = 'row.names')
   diff_table$pval.adj <- p.adjust(diff_table$pval, method = 'fdr')
-  diff_table <- diff_table %>% 
+  diff_table <- diff_table %>%
     rename(FeatureID = Row.names)
-  
+
   return(diff_table)
   
 }
@@ -155,16 +170,13 @@ plot_vank <- function(df, color_by, facet_by = NULL, facet_by2 = NULL){
 }
 
 # -------------------------------------------------------------------------
-plot_boxplot <- function(df, my_x, my_y, color_by, my_comparisons = NULL){
+plot_boxplot <- function(df, my_x, my_y, color_by, my_colors){
   ggplot(df,
          aes(x = {{my_x}},
              y = {{my_y}},
              fill = {{color_by}})) +
     geom_boxplot() +
-    scale_fill_jama() +
-    stat_compare_means(comparisons = {{my_comparisons}},
-                       method = 't.test',
-                       label = 'p.signif') +
+    scale_fill_manual(values = {{my_colors}}) +
     theme_bw() +
     theme(plot.title = element_text(face = 'bold', hjust = 0.5))
 }
