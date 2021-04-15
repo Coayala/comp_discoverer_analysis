@@ -1,20 +1,36 @@
 ---
-title: "KEGG identifiers"
+title: "4_Dysregulated Pathways"
 author: "Christian Ayala"
-date: "3/19/2021"
+date: "4/14/2021"
 output: html_document
-editor_options: 
-  chunk_output_type: console
 ---
+
+This Notebook will explore the KEGG (and Metabolika) Pathways that are dysregulated
 
 # 1. Importing Libraries
 
 ```{r libraries, message=FALSE, warning=FALSE}
-library(tidyverse)
+library(ggpubr)
+library(ggsci)
+library(ggrepel)
+library(pheatmap)
+library(RColorBrewer)
+library(scales)
+library(plyr)
+library(cowplot)
 library(readxl)
+library(KEGGREST)
+library(tidyverse)
+source('functions_dysreg_path.R')
 ```
 
-# 2. Set path variables and import data
+# 2. Import Data
+
+```{r}
+# Flag for labeled / unlabeled data, set TRUE or FALSE
+
+label = TRUE
+```
 
 ```{r set_path, message=FALSE, warning=FALSE}
 # set path variables
@@ -24,41 +40,481 @@ figures_dir <- file.path(project_dir, paste0(project_name, '_output_figures'))
 tables_dir <- file.path(project_dir,  paste0(project_name, '_output_tables'))
 ```
 
-```{r}
-kegg_res_file <- file.path(tables_dir, 'KEGG_results.xlsx')
-kegg_res <- read_xlsx(kegg_res_file)
+This analysis uses the tables generated during the Differential Analysis script.
 
+```{r message=FALSE, warning=FALSE}
+# Load compounds table
+
+# If the flag was set before, nothing needs to be changed here, the correct file will be automatically used
+if(label == TRUE){
+  compounds_table_file <- file.path(tables_dir, 'compounds_table.csv')
+}else{
+  compounds_table_file <- file.path(tables_dir, 'gap_filled_compounds_table.csv')
+}
+compounds_table <- read_csv(compounds_table_file)
+
+# Import metadata and fix names
+metadata_file <- file.path(tables_dir, 'fixed_metadata.csv')
+metadata <- read_csv(metadata_file)
+
+# Import table(s) obtained during the Differential analysis
 table_file <- file.path(tables_dir, 'Diff_expressed_T1.csv')
-T1_to_T0.diff_table <- read_csv(table_file)
+T1.diff_table <- read_csv(table_file)
 table_file <- file.path(tables_dir, 'Diff_expressed_T2.csv')
-T2_to_T0.diff_table <- read_csv(table_file)
+T2.diff_table <- read_csv(table_file)
 table_file <- file.path(tables_dir, 'Diff_expressed_T3.csv')
-T3_to_T0.diff_table <- read_csv(table_file)
+T3.diff_table <- read_csv(table_file)
+
+# Import diff tables of NMR data
+# Import table(s) obtained during the Differential analysis
+table_file <- file.path(tables_dir, 'Diff_expressed_NMR_T1.csv')
+T1.NMR.diff_table <- read_csv(table_file)
+table_file <- file.path(tables_dir, 'Diff_expressed_NMR_T2.csv')
+T2.NMR.diff_table <- read_csv(table_file)
+table_file <- file.path(tables_dir, 'Diff_expressed_NMR_T3.csv')
+T3.NMR.diff_table <- read_csv(table_file)
+
 ```
 
-# 3. Merge KEGG annotations
+From Compound Discover export a **2-level** table with: 
+
+- *KEGG Pathways* in the first level with the columns: PathwayID, Pathway Name
+- *Compounds* in the second level (Only way I found to be able to export the **KEGG Compounds IDs**) with the columns: Checked, Molecular Weight, Name, Formula, KEGG Compound Ids, KEGG Compound Names
+
+```{r message=FALSE, warning=FALSE}
+kegg_table_file <- file.path(tables_dir, 'KEGG Pathways_ok.xlsx')
+kegg_table <- read_xlsx(kegg_table_file)
+
+# Fix column names
+colnames(kegg_table) <- c('PathwayID', 'Pathway_Name', 'Name', 'Formula', 'Molecular Weight', 'KEGG_ID', 'KEGG_Name')
+
+# Fix 2-level table into regular table
+
+kegg_table <- kegg_table %>% 
+  filter(Pathway_Name != 'Checked') %>% 
+  mutate(Pathway_Name = ifelse(Pathway_Name == 'FALSE', NA, Pathway_Name)) %>% 
+  fill(PathwayID, Pathway_Name, .direction = 'down') %>% 
+  filter(!is.na(`Molecular Weight`)) %>% 
+  select(-`Molecular Weight`)
+```
+
+# 3. Analyze KEGG Pathways annotated at each time point
+
+Merge KEGG annotation with Differential analysis data
 
 ```{r}
 # This step includes filtering for significant DE metabolites (pval.adj < 0.05)
-T1_to_T0.K_ID <- mz_res %>% 
-  select(`KEGG ID`, Name) %>% 
-  right_join(T1_to_T0.diff_table, by = 'Name') %>% 
-  filter(pval.adj < 0.05)
-
-T2_to_T0.K_ID <- mz_res %>% 
-  select(`KEGG ID`, Name) %>% 
-  right_join(T2_to_T0.diff_table, by = 'Name') %>% 
+T1.kegg <- T1.diff_table %>%
+  select(FeatureID, Name, Formula, log2FC, pval.adj, Comment) %>% 
+  left_join(kegg_table, by = c('Name', 'Formula')) %>% 
+  distinct() %>% 
   filter(pval.adj < 0.05) %>% 
-  filter(!is.na(`KEGG ID`))
+  filter(!is.na(Pathway_Name)) %>% 
+  mutate(Time = 'T1')
 
-T3_to_T0.K_ID <- mz_res %>% 
-  select(`KEGG ID`, Name) %>% 
-  right_join(T3_to_T0.diff_table, by = 'Name') %>% 
-  filter(pval.adj < 0.05) %>% 
-  filter(!is.na(`KEGG ID`))
+T2.kegg <- T2.diff_table %>%
+  select(FeatureID, Name, Formula, log2FC, pval.adj, Comment) %>% 
+  left_join(kegg_table, by = c('Name', 'Formula')) %>% 
+  distinct() %>% 
+  filter(pval.adj < 0.05)%>% 
+  filter(!is.na(Pathway_Name)) %>% 
+  mutate(Time = 'T2')
+
+T3.kegg <- T3.diff_table %>%
+  select(FeatureID, Name, Formula, log2FC, pval.adj, Comment) %>% 
+  left_join(kegg_table, by = c('Name', 'Formula')) %>% 
+  distinct() %>% 
+  filter(pval.adj < 0.05)%>% 
+  filter(!is.na(Pathway_Name)) %>% 
+  mutate(Time = 'T3')
+```
+
+## 3.1 Plot number of KEGG pathways
+
+```{r}
+# Set colors for plot
+my_colors = c('Not present in control' = '#d8365e', 
+              'Upregulated' = '#d34849',
+              'Downregulated' = '#005193',
+              'Only present in control' = '#4b70de')
+
+T1_counts.kegg <- T1.kegg %>% 
+  group_by(Comment) %>% 
+  count(Pathway_Name) %>% 
+  ungroup() %>% 
+  mutate(Time = 'T1')
+
+T1_counts.kegg.plot <- plot_col(T1_counts.kegg, n, Pathway_Name, Comment, my_colors = my_colors) +
+  facet_wrap(~Comment) +
+  labs(title = 'Dysregulated KEGG Pathways at T1',
+       y = 'Pathway Name') +
+  scale_x_continuous(breaks = pretty_breaks(3))
+T1_counts.kegg.plot
+
+figure_file <- file.path(figures_dir, 'Dysreg_KEGG_T1.png')
+ggsave(figure_file, T1_counts.kegg.plot, dpi = 300)
+
+T2_counts.kegg <- T2.kegg %>% 
+  group_by(Comment) %>% 
+  count(Pathway_Name) %>% 
+  ungroup() %>% 
+  mutate(Time = 'T2')
+
+T2_counts.kegg.plot <- plot_col(T2_counts.kegg, n, Pathway_Name, Comment, my_colors = my_colors) +
+  facet_wrap(~Comment) +
+  labs(title = 'Dysregulated KEGG Pathways at T2',
+       y = 'Pathway Name') +
+  scale_x_continuous(breaks = pretty_breaks(1))
+T2_counts.kegg.plot
+
+figure_file <- file.path(figures_dir, 'Dysreg_KEGG_T2.png')
+ggsave(figure_file, T2_counts.kegg.plot, dpi = 300)
+
+T3_counts.kegg <- T3.kegg %>% 
+  group_by(Comment) %>% 
+  count(Pathway_Name) %>% 
+  ungroup() %>% 
+  mutate(Time = 'T3')
+
+T3_counts.kegg.plot <- plot_col(T3_counts.kegg, n, Pathway_Name, Comment, my_colors = my_colors) +
+  facet_wrap(~Comment) +
+  labs(title = 'Dysregulated KEGG Pathways at T3',
+       y = 'Pathway Name') +
+  scale_x_continuous(breaks = pretty_breaks(2))
+T3_counts.kegg.plot
+
+figure_file <- file.path(figures_dir, 'Dysreg_KEGG_T3.png')
+ggsave(figure_file, T3_counts.kegg.plot, dpi = 300)
+
+```
+
+## 3.2 General visualization of dysregulated KEGG pathways
+
+```{r fig.height=10}
+
+lcms_kegg <- rbind(T1_counts.kegg, T2_counts.kegg, T3_counts.kegg) %>% 
+  mutate(Source = paste(Time, Comment, sep = '_')) %>% 
+  select(-Comment, -Time)
+
+lcms_kegg <- pivot_wider(lcms_kegg, names_from = Source, values_from = n)
+
+lcms_kegg[is.na(lcms_kegg)] <- 0
+
+lcms_kegg <- pivot_longer(lcms_kegg, cols = 2:6, names_to = 'Source', values_to = 'n')
+
+lcms_kegg <- ddply(lcms_kegg, .(Source), transform, rescale = rescale(n))
+
+kegg_heatmap <- ggplot(lcms_kegg,
+                       aes(x = Source,
+                           y = Pathway_Name,
+                           fill = rescale)) +
+  geom_tile(color = 'white') +
+  coord_fixed() +
+  scale_fill_distiller(palette = 'Blues', direction = 1) +
+  theme_bw() +
+  theme(plot.title = element_text(face = 'bold', hjust = 0.5),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        axis.title.x = element_blank()) +
+  labs(title = 'Dysregulated KEGG Pathways',
+       y = 'Pathway Name',
+       fill = 'Scaled counts')
+kegg_heatmap
+
+figure_file <- file.path(figures_dir, 'KEGG_tile_heatmap.png')
+ggsave(figure_file, kegg_heatmap, height = 10)
+```
+
+## 3.3 KEGG Pathways from NMR data
+
+Use the KEGGREST API to find the *KEGG Pathways* associated with the *KEGG Compound ID* from each metabolite identified with NMR
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+
+T1.NMR.diff_table <- filter(T1.NMR.diff_table, !is.na(`KEGG Compound ID`))
+
+T1_NMR.kegg <- tibble(Pathway_Name = NA, KEGG_ID = NA, Name = NA, Comment = NA, Time = 'T1')
+for(i in 1:length(T1.NMR.diff_table$`KEGG Compound ID`)){
+  k_id <- T1.NMR.diff_table$`KEGG Compound ID`[i]
+  query <- keggGet(k_id)
+  pathway <- query[[1]]$PATHWAY
+  if(is.null(pathway)){
+    pathway <- NA
+  }
+  t_tibble <- tibble(Pathway_Name = pathway,
+                     KEGG_ID = k_id,
+                     Name = T1.NMR.diff_table$Name[i],
+                     Comment = T1.NMR.diff_table$Comment[i],
+                     Time = 'T1')
+  T1_NMR.kegg <- rbind(T1_NMR.kegg, t_tibble)
+  print(i)
+}
+
+T2.NMR.diff_table <- filter(T2.NMR.diff_table, !is.na(`KEGG Compound ID`))
+
+T2_NMR.kegg <- tibble(Pathway_Name = NA, KEGG_ID = NA, Name = NA, Comment = NA, Time = 'T2')
+for(i in 1:length(T2.NMR.diff_table$`KEGG Compound ID`)){
+  k_id <- T2.NMR.diff_table$`KEGG Compound ID`[i]
+  query <- keggGet(k_id)
+  pathway <- query[[1]]$PATHWAY
+  if(is.null(pathway)){
+    pathway <- NA
+  }
+  t_tibble <- tibble(Pathway_Name = pathway,
+                     KEGG_ID = k_id,
+                     Name = T2.NMR.diff_table$Name[i],
+                     Comment = T2.NMR.diff_table$Comment[i],
+                     Time = 'T2')
+  T2_NMR.kegg <- rbind(T2_NMR.kegg, t_tibble)
+  print(i)
+}
+
+T3.NMR.diff_table <- filter(T3.NMR.diff_table, !is.na(`KEGG Compound ID`))
+
+T3_NMR.kegg <- tibble(Pathway_Name = NA, KEGG_ID = NA, Name = NA, Comment = NA, Time = 'T3')
+for(i in 1:length(T3.NMR.diff_table$`KEGG Compound ID`)){
+  k_id <- T3.NMR.diff_table$`KEGG Compound ID`[i]
+  query <- keggGet(k_id)
+  pathway <- query[[1]]$PATHWAY
+  if(is.null(pathway)){
+    pathway <- NA
+  }
+  t_tibble <- tibble(Pathway_Name = pathway,
+                     KEGG_ID = k_id,
+                     Name = T3.NMR.diff_table$Name[i],
+                     Comment = T3.NMR.diff_table$Comment[i],
+                     Time = 'T3')
+  T3_NMR.kegg <- rbind(T3_NMR.kegg, t_tibble)
+  print(i)
+}
+```
+
+Plotting the Heatmap of the KEGG Pathways associated with NMR data
+
+```{r fig.height=10}
+
+T1_NMR_counts.kegg <- T1_NMR.kegg %>% 
+  group_by(Comment) %>% 
+  count(Pathway_Name) %>% 
+  ungroup() %>% 
+  filter(n > 2) %>%
+  mutate(Time = 'T1')
+
+T2_NMR_counts.kegg <- T2_NMR.kegg %>% 
+  group_by(Comment) %>% 
+  count(Pathway_Name) %>% 
+  ungroup() %>% 
+  filter(n > 2) %>%
+  mutate(Time = 'T2')
+
+T3_NMR_counts.kegg <- T3_NMR.kegg %>% 
+  group_by(Comment) %>% 
+  count(Pathway_Name) %>% 
+  ungroup() %>% 
+  filter(n > 2) %>%
+  mutate(Time = 'T3')
+
+nmr_kegg <- rbind(T1_NMR_counts.kegg, T2_NMR_counts.kegg, T3_NMR_counts.kegg) %>% 
+  mutate(Source = paste(Time, Comment, sep = '_')) %>% 
+  select(-Comment, -Time)
+
+nmr_kegg <- pivot_wider(nmr_kegg, names_from = Source, values_from = n)
+
+nmr_kegg[is.na(nmr_kegg)] <- 0
+
+nmr_kegg <- pivot_longer(nmr_kegg, cols = 2:11, names_to = 'Source', values_to = 'n')
+
+nmr_kegg <- ddply(nmr_kegg, .(Source), transform, rescale = rescale(n))
+
+kegg_nmr_heatmap <- ggplot(nmr_kegg,
+                       aes(x = Source,
+                           y = Pathway_Name,
+                           fill = rescale)) +
+  geom_tile(color = 'white') +
+  coord_fixed() +
+  scale_fill_distiller(palette = 'Blues', direction = 1) +
+  theme_bw() +
+  theme(plot.title = element_text(face = 'bold', hjust = 0.5),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        axis.title.x = element_blank()) +
+  labs(title = 'Dysregulated KEGG Pathways',
+       y = 'Pathway Name',
+       fill = 'Scaled counts')
+kegg_nmr_heatmap
+
+figure_file <- file.path(figures_dir, 'KEGG_tile_heatmap_with_NMR.png')
+ggsave(figure_file, kegg_nmr_heatmap, height = 10)
+```
+
+## 3.4 KEGG Pathways from the sum of LC-MS2 and NMR data
+
+```{r fig.height=10}
+# Join both datasets together
+T1_all_counts <- T1.kegg %>% 
+  select(Pathway_Name, KEGG_ID, Name, Comment, Time) %>% 
+  rbind(T1_NMR.kegg) %>%
+  group_by(Comment) %>% 
+  count(Pathway_Name) %>% 
+  ungroup() %>% 
+  filter(n > 1) %>%
+  mutate(Time = 'T1')
+
+T2_all_counts <- T2.kegg %>% 
+  select(Pathway_Name, KEGG_ID, Name, Comment, Time) %>% 
+  rbind(T2_NMR.kegg) %>%
+  group_by(Comment) %>% 
+  count(Pathway_Name) %>% 
+  ungroup() %>% 
+  filter(n > 1) %>%
+  mutate(Time = 'T2')
+
+T3_all_counts <- T3.kegg %>% 
+  select(Pathway_Name, KEGG_ID, Name, Comment, Time) %>% 
+  rbind(T3_NMR.kegg) %>%
+  group_by(Comment) %>% 
+  count(Pathway_Name) %>% 
+  ungroup() %>% 
+  filter(n > 1) %>%
+  mutate(Time = 'T3')
+
+all_kegg <- rbind(T1_all_counts, T2_all_counts, T3_all_counts) %>% 
+  mutate(Source = paste(Time, Comment, sep = '_')) %>% 
+  select(-Comment, -Time)
+
+all_kegg <- pivot_wider(all_kegg, names_from = Source, values_from = n)
+
+all_kegg[is.na(all_kegg)] <- 0
+
+all_kegg <- pivot_longer(all_kegg, cols = 2:12, names_to = 'Source', values_to = 'n')
+
+all_kegg <- ddply(all_kegg, .(Source), transform, rescale = rescale(n))
+
+kegg_all_heatmap <- ggplot(all_kegg,
+                       aes(x = Source,
+                           y = Pathway_Name,
+                           fill = rescale)) +
+  geom_tile(color = 'white') +
+  coord_fixed() +
+  scale_fill_distiller(palette = 'Blues', direction = 1) +
+  theme_bw() +
+  theme(plot.title = element_text(face = 'bold', hjust = 0.5),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        axis.title.x = element_blank()) +
+  labs(title = 'Dysregulated KEGG Pathways',
+       y = 'Pathway Name',
+       fill = 'Scaled counts')
+kegg_all_heatmap
+
+figure_file <- file.path(figures_dir, 'KEGG_tile_heatmap_all_data.png')
+ggsave(figure_file, kegg_all_heatmap, height = 10)
+```
+
+## 3.5 Extract vectors with KEGG IDs
+
+```{r}
+lc_kegg_ids <- rbind(T1.kegg, T2.kegg, T3.kegg) %>% 
+  select(KEGG_ID, Time, Comment) %>% 
+  mutate(Source = paste(Time, Comment, sep = '_')) %>% 
+  select(-Comment, - Time) %>% 
+  separate_rows(KEGG_ID, sep = '; ') %>% 
+  group_by(Source) %>% 
+  distinct() %>% 
+  ungroup()
+  
+nmr_kegg_ids <- rbind(T1_NMR.kegg, T2_NMR.kegg, T3_NMR.kegg) %>% 
+  filter(!is.na(KEGG_ID)) %>% 
+  select(KEGG_ID, Time, Comment) %>% 
+  mutate(Source = paste(Time, Comment, sep = '_')) %>% 
+  select(-Comment, - Time) %>% 
+  group_by(Source) %>% 
+  distinct() %>% 
+  ungroup()
+
+all_kegg_ids <- rbind(lc_kegg_ids, nmr_kegg_ids) %>% 
+  mutate(Color = case_when(Source == 'T1_Not present in control' ~ '#FF3300',
+                           Source == 'T1_Upregulated' ~ '#FF6600',
+                           Source == 'T1_Downregulated' ~ '#FF9900',
+                           Source == 'T1_Only present in control' ~ '#FFCC00',
+                           Source == 'T2_Not present in control' ~ '#000066',
+                           Source == 'T2_Upregulated' ~ '#000099',
+                           Source == 'T2_Downregulated' ~ '#3333CC',
+                           Source == 'T2_Only present in control' ~ '#6969FF',
+                           Source == 'T3_Not present in control' ~ '#005C2E',
+                           Source == 'T3_Upregulated' ~ '#3329A3c',
+                           Source == 'T3_Downregulated' ~ '#66CC99',
+                           Source == 'T3_Only present in control' ~ '#99FFCC')) %>% 
+  mutate(for_kegg_mapper = paste(KEGG_ID, Color, sep = ' '))
+
+table_file <- file.path(tables_dir, 'KEGG_ids_for_mapper.csv')
+write_csv(all_kegg_ids, table_file)
 ```
 
 
+# 4. Analyze Metabolika Pathways at each time point
+
+```{r}
+T1.metabolika <- T1.diff_table %>% 
+  select(`Metabolika Pathways`, pval.adj, Comment) %>% 
+  filter(pval.adj < 0.05) %>% 
+  separate_rows(`Metabolika Pathways`, sep = ';') %>% 
+  filter(!is.na(`Metabolika Pathways`)) %>% 
+  group_by(Comment) %>% 
+  count(`Metabolika Pathways`) %>% 
+  ungroup() %>% 
+  mutate(Time = 'T1')
+
+T2.metabolika <- T2.diff_table %>% 
+  select(`Metabolika Pathways`, pval.adj, Comment) %>% 
+  filter(pval.adj < 0.05) %>% 
+  separate_rows(`Metabolika Pathways`, sep = ';') %>% 
+  filter(!is.na(`Metabolika Pathways`)) %>% 
+  group_by(Comment) %>% 
+  count(`Metabolika Pathways`) %>% 
+  ungroup() %>% 
+  mutate(Time = 'T2')
+
+T3.metabolika <- T3.diff_table %>% 
+  select(`Metabolika Pathways`, pval.adj, Comment) %>% 
+  filter(pval.adj < 0.05) %>% 
+  separate_rows(`Metabolika Pathways`, sep = ';') %>% 
+  filter(!is.na(`Metabolika Pathways`)) %>% 
+  group_by(Comment) %>% 
+  count(`Metabolika Pathways`) %>% 
+  ungroup() %>% 
+  mutate(Time = 'T3')
+```
+
+```{r}
+all_metabolika <- rbind(T1.metabolika, T2.metabolika, T3.metabolika) %>% 
+  mutate(Source = paste(Time, Comment, sep = '_')) %>% 
+  select(-Comment, -Time)
+
+all_metabolika <- pivot_wider(all_metabolika, names_from = Source, values_from = n)
+
+all_metabolika[is.na(all_metabolika)] <- 0
+
+all_metabolika <- pivot_longer(all_metabolika, cols = 2:3, names_to = 'Source', values_to = 'n')
+
+all_metabolika <- ddply(all_metabolika, .(Source), transform, rescale = rescale(n))
+
+metabolika_all_heatmap <- ggplot(all_metabolika,
+                       aes(x = Source,
+                           y = Metabolika.Pathways,
+                           fill = rescale)) +
+  geom_tile(color = 'white') +
+  coord_fixed() +
+  scale_fill_distiller(palette = 'Blues', direction = 1) +
+  theme_bw() +
+  theme(plot.title = element_text(face = 'bold', hjust = 0.5),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        axis.title.x = element_blank()) +
+  labs(title = 'Dysregulated metabolika Pathways',
+       y = 'Pathway Name',
+       fill = 'Scaled counts')
+metabolika_all_heatmap
+
+figure_file <- file.path(figures_dir, 'metabolika_tile_heatmap_all_data.png')
+ggsave(figure_file, metabolika_all_heatmap)
+```
 
 
 
