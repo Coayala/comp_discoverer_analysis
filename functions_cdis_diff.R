@@ -50,20 +50,22 @@ get_diff_table <- function(auc_matrix, control.sample_list, treatment.sample_lis
     mutate(ratio = treatment_means/control_means) %>% # get the control/treatment ratio
     mutate(log2FC = log2(ratio)) # calculate log2FC
   
+  rownames(diff_table) <- rownames(auc_matrix)
+  
   # Initialize pvalues matrix
   pvalues <- data.frame(row.names = rownames(auc_matrix), pval = rep(0, length(rownames(auc_matrix))))
-
+  
   #Calculate pvalue per each of the features
   for(i in 1:nrow(pvalues)){
     t.test <- t.test(as.numeric(temp.df_control[i,]), as.numeric(temp.df_treatment[i,]), paired = FALSE)
     pvalues$pval[i] <- t.test$p.value
   }
-
+  
   diff_table <- merge(diff_table, pvalues, by = 'row.names')
   diff_table$pval.adj <- p.adjust(diff_table$pval, method = 'fdr')
   diff_table <- diff_table %>%
     rename(FeatureID = Row.names)
-
+  
   return(diff_table)
   
 }
@@ -84,6 +86,8 @@ get_diff_table_no_pval <- function(auc_matrix, control.sample_list, treatment.sa
   diff_table <- diff_table %>% 
     mutate(ratio = treatment_means/control_means) %>% # get the control/treatment ratio
     mutate(log2FC = log2(ratio)) # calculate log2FC
+  
+  rownames(diff_table) <- rownames(auc_matrix)
   
   return(diff_table)
   
