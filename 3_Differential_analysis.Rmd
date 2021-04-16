@@ -86,6 +86,8 @@ T3.samples <- get_samples(metadata, Treatment = 'Time', value = 'T3')
 
 ## 3.2 Get table of differentially expressed features per each comparison
 
+The following function will calculate ratio, log2FC, p values and adjusted pvalues. If no replicates are available for EACH treatment please use the get_diff_table_no_pval() function
+
 ```{r}
 
 # The following function will calculate ratio, log2FC, p values and adjusted pvalues. If no replicates are available for EACH treatment
