@@ -34,21 +34,27 @@ get_vectors <- function(df, filter_by, value, get_col){
 }
 
 # -------------------------------------------------------------------------
-get_diff_table <- function(auc_matrix, control.sample_list, treatment.sample_list){
+get_diff_table <- function(auc_matrix, control.sample_list, treatment.sample_list, log2_transformed = FALSE){
   
   # Get the AUC values per each sample and calculate the means per feature
   temp.df_control <- auc_matrix %>% 
     select(all_of(control.sample_list))
-  control_means <- rowMeans(temp.df_control)
+  control_means <- rowMeans(temp.df_control, na.rm = TRUE)
   
   temp.df_treatment <- auc_matrix %>% 
     select(all_of(treatment.sample_list))
-  treatment_means <- rowMeans(temp.df_treatment)
+  treatment_means <- rowMeans(temp.df_treatment, na.rm = TRUE)
   
   diff_table <- as.data.frame(cbind(control_means, treatment_means))
-  diff_table <- diff_table %>% 
-    mutate(ratio = treatment_means/control_means) %>% # get the control/treatment ratio
-    mutate(log2FC = log2(ratio)) # calculate log2FC
+  
+  if(log2_transformed == TRUE){
+    diff_table <- diff_table %>% 
+      mutate(log2FC = treatment_means - control_means)
+  } else {
+    diff_table <- diff_table %>% 
+      mutate(ratio = treatment_means/control_means) %>% # get the control/treatment ratio
+      mutate(log2FC = log2(ratio)) # calculate log2FC
+  }
   
   rownames(diff_table) <- rownames(auc_matrix)
   
@@ -71,23 +77,31 @@ get_diff_table <- function(auc_matrix, control.sample_list, treatment.sample_lis
 }
 
 # -------------------------------------------------------------------------
-get_diff_table_no_pval <- function(auc_matrix, control.sample_list, treatment.sample_list){
+get_diff_table_no_pval <- function(auc_matrix, control.sample_list, treatment.sample_list, log2_transformed = FALSE){
   
   # Get the AUC values per each sample and calculate the means per feature
   temp.df_control <- auc_matrix %>% 
     select(all_of(control.sample_list))
-  control_means <- rowMeans(temp.df_control)
+  control_means <- rowMeans(temp.df_control, na.rm = TRUE)
   
   temp.df_treatment <- auc_matrix %>% 
     select(all_of(treatment.sample_list))
-  treatment_means <- rowMeans(temp.df_treatment)
+  treatment_means <- rowMeans(temp.df_treatment, na.rm = TRUE)
   
   diff_table <- as.data.frame(cbind(control_means, treatment_means))
-  diff_table <- diff_table %>% 
-    mutate(ratio = treatment_means/control_means) %>% # get the control/treatment ratio
-    mutate(log2FC = log2(ratio)) # calculate log2FC
+  
+  if(log2_transformed == TRUE){
+    diff_table <- diff_table %>% 
+      mutate(log2FC = treatment_means - control_means)
+  } else {
+    diff_table <- diff_table %>% 
+      mutate(ratio = treatment_means/control_means) %>% # get the control/treatment ratio
+      mutate(log2FC = log2(ratio)) # calculate log2FC
+  }
   
   rownames(diff_table) <- rownames(auc_matrix)
+  
+  diff_table <- rownames_to_column(diff_table, var = 'FeatureID')
   
   return(diff_table)
   
@@ -118,7 +132,7 @@ plot_volcano <- function(df, log2FC, pval, log2FC.threshold, pval.threshold){
          aes(x = {{log2FC}},
              y = -log10({{pval}}))) +
     geom_point(color = ifelse(abs(df$log2FC) > {{log2FC.threshold}} & 
-                                -log10(df$pval.adj) > -log10({{pval.threshold}}), "#FF0000", "#000000")) +
+                                -log10(df$pval) > -log10({{pval.threshold}}), "#FF0000", "#000000")) +
     geom_vline(xintercept = c(-{{log2FC.threshold}}, {{log2FC.threshold}}),
                linetype = 'dotted',
                size = 1,

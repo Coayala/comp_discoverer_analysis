@@ -1,0 +1,706 @@
+---
+title: "3_Differential Analysis"
+author: "Christian Ayala"
+date: "3/19/2021"
+output: html_document
+---
+
+This Notebook is to perform the differential analysis of the normalized AUC from *Compound Discoverer*.
+
+# 1. Importing Libraries
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggrepel)
+library(ggnewscale)
+library(ggpubr)
+library(ggsci)
+library(pheatmap)
+library(RColorBrewer)
+library(readxl)
+library(UpSetR)
+source('functions_cdis_diff.R')
+```
+
+# 2. Import data
+
+Set if the data to be used is going to be labeled or unlabeled
+
+```{r}
+# Flag for labeled / unlabeled data, set TRUE or FALSE
+
+label = TRUE
+```
+
+Because differential analysis includes the calculations of means, the data to be used in this section is the normalized untransformed data
+
+```{r set_path, message=FALSE, warning=FALSE}
+# set path variables
+project_dir <- getwd()
+project_name <- 'Bog_labeled_all'
+figures_dir <- file.path(project_dir, paste0(project_name, '_output_figures'))
+tables_dir <- file.path(project_dir,  paste0(project_name, '_output_tables'))
+norm_auc_table_file <- file.path(tables_dir, 'normalized_transformed_auc_table.csv')
+
+# If the flag was setted before, nothing needs to be changed here, the correct file will be automatically used
+if(label == TRUE){
+  compounds_table_file <- file.path(tables_dir, 'labeled_compounds_table_in_all.csv')
+}else{
+  compounds_table_file <- file.path(tables_dir, 'gap_filled_compounds_table.csv')
+}
+
+# Load auc_table
+
+norm.matrix <- read_csv(norm_auc_table_file)
+norm.matrix <- column_to_rownames(norm.matrix, var = 'X1')
+
+# Load compounds table and add a column that has names for identified compounds and FeatureID for the rest (for plotting purpouses)
+
+compounds_table <- read_csv(compounds_table_file)
+
+# Import metadata and fix names
+metadata_file <- file.path(tables_dir, 'fixed_metadata.csv')
+metadata <- read_csv(metadata_file) %>% 
+  filter(Label == 'Labeled' | SampleID == 'BNC')
+
+# Import NMR data
+nmr_file <- file.path(project_dir, 'data', 'Bog_label_NMR_data.csv')
+nmr_table <- read_csv(nmr_file)
+nmr_table <- pivot_longer(nmr_table, cols = 8:21, names_to = c('SampleID','.value'), 
+                          names_pattern = '(.*)_datatype_(.*)')
+colnames(nmr_table)[1] <- 'Name'
+
+nmr_unlabeled <- nmr_table %>% 
+  filter(label_verification != 'Y', concentration > 0) %>% 
+  select(-label_verification) %>% 
+  left_join(metadata, by = 'SampleID')
+
+write_csv(nmr_unlabeled, file.path(tables_dir, 'unlabeled_NMR.csv'), )
+
+nmr_table <- nmr_table %>% 
+  filter(label_verification == 'Y') %>% 
+  select(Name, SampleID, concentration, `KEGG Compound ID`, Formula, Weight, InChI) %>% 
+  pivot_wider(names_from = 'SampleID', values_from = 'concentration')
+# Add NMR data for BNC
+
+nmr_file <- file.path(project_dir, 'data', 'Saleska_BOG_concentrations_ALL.xlsx')
+nmr_bnc <- read_xlsx(nmr_file, skip = 4) %>% 
+  select(`SALESKA BOG`, contains('BNC'))
+colnames(nmr_bnc) <- str_remove(colnames(nmr_bnc), '_1D.*')
+
+nmr.matrix <- nmr_table %>% 
+  select(-`KEGG Compound ID`, -Formula, -Weight, -InChI) %>% 
+  left_join(nmr_bnc, by = c('Name' = 'SALESKA BOG')) %>% 
+  column_to_rownames(var = 'Name')
+
+write.csv(nmr.matrix, file.path(tables_dir, 'NMR_matrix.csv'), row.names = TRUE)
+
+```
+
+# 3. Calculate ratios and log2fold-change
+
+## 3.1 Get samples per each treatment
+
+```{r}
+
+# Get the average AUC per each of the treatments
+## Get samples per treatment
+
+T0.samples <- get_samples(metadata, Treatment = 'Time', value = 'T0')
+T1.samples <- get_samples(metadata, Treatment = 'Time', value = 'T1')
+T2.samples <- get_samples(metadata, Treatment = 'Time', value = 'T2')
+T3.samples <- get_samples(metadata, Treatment = 'Time', value = 'T3')
+
+```
+
+## 3.2 Get table of differentially expressed features per each comparison
+
+The following function will calculate ratio, log2FC, p values and adjusted pvalues. If no replicates are available for EACH treatment please use the get_diff_table_no_pval() function
+
+```{r}
+
+# The following function will calculate ratio, log2FC, p values and adjusted pvalues. If no replicates are available for EACH treatment
+# please use the get_diff_table_no_pval() function
+
+T1_to_T0.diff_table <- get_diff_table(norm.matrix, control.sample_list = T0.samples, treatment.sample_list = T1.samples, log2_transformed = TRUE)
+T2_to_T0.diff_table <- get_diff_table(norm.matrix, control.sample_list = T0.samples, treatment.sample_list = T2.samples, log2_transformed = TRUE)
+T3_to_T0.diff_table <- get_diff_table(norm.matrix, control.sample_list = T0.samples, treatment.sample_list = T3.samples, log2_transformed = TRUE)
+```
+
+Merge differentially expressed features with the annotation
+
+```{r}
+
+# Create dataframes for the up and downregulated metabolites at each time point and merge them with the compound information
+
+T1_to_T0.diff_table <- compounds_table %>% 
+  select(-contains('Annotation Source:'), - contains('Results'), -SampleID, -AUC, -Label, -Comp, - Time,
+         -label_manual) %>% 
+  right_join(T1_to_T0.diff_table, by = 'FeatureID') %>% 
+  distinct() %>% 
+  filter(!is.nan(pval)) %>% 
+  mutate(Comment = case_when(control_means == 0 & treatment_means > 0 ~ 'Not present in control',
+                             control_means > 0 & treatment_means == 0 ~ 'Only present in control',
+                             log2FC > 0 ~ 'Upregulated',
+                             log2FC < 0 ~ 'Downregulated'))
+
+T1_to_T0.diff_table$Comment <- factor(T1_to_T0.diff_table$Comment, 
+                               levels = c('Only present in control', 'Downregulated', 'Upregulated', 'Not present in control' ))
+
+table_file <- file.path(tables_dir, 'Diff_expressed_T1.csv')
+write_csv(T1_to_T0.diff_table, table_file )
+
+T2_to_T0.diff_table <- compounds_table %>% 
+  select(-contains('Annotation Source:'), - contains('Results'), -SampleID, -AUC, -Label, -Comp, - Time, 
+         -label_manual) %>%
+  right_join(T2_to_T0.diff_table, by = 'FeatureID') %>% 
+  distinct() %>% 
+  filter(!is.nan(pval)) %>% 
+  mutate(Comment = case_when(control_means == 0 & treatment_means > 0 ~ 'Not present in control',
+                             control_means > 0 & treatment_means == 0 ~ 'Only present in control',
+                             log2FC > 0 ~ 'Upregulated',
+                             log2FC < 0 ~ 'Downregulated'))
+
+T2_to_T0.diff_table$Comment <- factor(T2_to_T0.diff_table$Comment, 
+                               levels = c('Only present in control', 'Downregulated', 'Upregulated', 'Not present in control' ))
+
+table_file <- file.path(tables_dir, 'Diff_expressed_T2.csv')
+write_csv(T2_to_T0.diff_table, table_file )
+
+T3_to_T0.diff_table <- compounds_table %>% 
+  select(-contains('Annotation Source:'), - contains('Results'), -SampleID, -AUC, -Label, -Comp, - Time, 
+         -label_manual) %>% 
+  right_join(T3_to_T0.diff_table, by = 'FeatureID') %>% 
+  distinct() %>% 
+  filter(!is.nan(pval)) %>% 
+  mutate(Comment = case_when(control_means == 0 & treatment_means > 0 ~ 'Not present in control',
+                             control_means > 0 & treatment_means == 0 ~ 'Only present in control',
+                             log2FC > 0 ~ 'Upregulated',
+                             log2FC < 0 ~ 'Downregulated'))
+
+T3_to_T0.diff_table$Comment <- factor(T3_to_T0.diff_table$Comment, 
+                               levels = c('Only present in control', 'Downregulated', 'Upregulated', 'Not present in control' ))
+
+table_file <- file.path(tables_dir, 'Diff_expressed_T3.csv')
+write_csv(T3_to_T0.diff_table, table_file )
+
+```
+
+Extract most differentially expressed features
+
+```{r warning=FALSE}
+
+# Extract significant features of each comparison based on adjusted pvalue
+sig_features <- c(T1_to_T0.diff_table$FeatureID[T1_to_T0.diff_table$pval < 0.05],
+                  T2_to_T0.diff_table$FeatureID[T2_to_T0.diff_table$pval < 0.05],
+                  T3_to_T0.diff_table$FeatureID[T3_to_T0.diff_table$pval < 0.05])
+
+sig_features <- unique(sig_features)
+```
+
+
+# 4. Plots of dysregulated features
+
+## 4.1 Number of dysregulated features in each group
+
+```{r}
+
+num_diff_features <- tibble(Comparison = rep(c('T1_to_T0', 'T2_to_T0', 'T3_to_T0'), each = 2),
+                            Type = rep(c('Name', 'No name'), 3),
+                            count = 0)
+num_diff_features$Type <- factor(num_diff_features$Type, levels = c('No name', 'Name'))
+
+num_diff_features[1, 3] <- sum(T1_to_T0.diff_table$pval < 0.05 & !is.na(T1_to_T0.diff_table$Name), na.rm = TRUE)
+num_diff_features[2, 3] <- sum(T1_to_T0.diff_table$pval < 0.05 & is.na(T1_to_T0.diff_table$Name), na.rm = TRUE)
+num_diff_features[3, 3] <- sum(T2_to_T0.diff_table$pval < 0.05 & !is.na(T2_to_T0.diff_table$Name), na.rm = TRUE)
+num_diff_features[4, 3] <- sum(T2_to_T0.diff_table$pval < 0.05 & is.na(T2_to_T0.diff_table$Name), na.rm = TRUE)
+num_diff_features[5, 3] <- sum(T3_to_T0.diff_table$pval < 0.05 & !is.na(T3_to_T0.diff_table$Name), na.rm = TRUE)
+num_diff_features[6, 3] <- sum(T3_to_T0.diff_table$pval < 0.05 & is.na(T3_to_T0.diff_table$Name), na.rm = TRUE)
+
+
+num_diff_plot <- plot_col(num_diff_features, count, Comparison, Type) +
+  scale_fill_npg() +
+  labs(title = 'Number of dysregulated labeled metabolites per timepoint',
+       fill = 'ID')
+num_diff_plot
+
+figure_file <- file.path(figures_dir, 'Num_diff_features.png')
+ggsave(figure_file, num_diff_plot, dpi = 300)
+```
+
+## 4.2 Dysregulated features shared at different timepoints
+
+An **upset plot** is used instead of a Venn Diagram as it provides a better visualization of the number of figures that are being shared among groups
+
+```{r}
+# Filter diff tables by pval.adj
+
+T1.sig <- T1_to_T0.diff_table %>% 
+  filter(pval < 0.05)
+T2.sig <- T2_to_T0.diff_table %>% 
+  filter(pval < 0.05)
+T3.sig <- T3_to_T0.diff_table %>% 
+  filter(pval < 0.05)
+
+# Get list of features at each time point for each of the cases
+T1.upregulated <- get_vectors(T1.sig, 'Comment', 'Upregulated', 'FeatureID')
+T1.downregulated <- get_vectors(T1.sig, 'Comment', 'Downregulated', 'FeatureID')
+T1.not_in_control <- get_vectors(T1.sig, 'Comment', 'Not present in control', 'FeatureID')
+T1.only_in_control <- get_vectors(T1.sig, 'Comment', 'Only present in control', 'FeatureID')
+
+T2.upregulated <- get_vectors(T2.sig, 'Comment', 'Upregulated', 'FeatureID')
+T2.downregulated <- get_vectors(T2.sig, 'Comment', 'Downregulated', 'FeatureID')
+T2.not_in_control <- get_vectors(T2.sig, 'Comment', 'Not present in control', 'FeatureID')
+T2.only_in_control <- get_vectors(T2.sig, 'Comment', 'Only present in control', 'FeatureID')
+
+T3.upregulated <- get_vectors(T3.sig, 'Comment', 'Upregulated', 'FeatureID')
+T3.downregulated <- get_vectors(T3.sig, 'Comment', 'Downregulated', 'FeatureID')
+T3.not_in_control <- get_vectors(T3.sig, 'Comment', 'Not present in control', 'FeatureID')
+T3.only_in_control <- get_vectors(T3.sig, 'Comment', 'Only present in control', 'FeatureID')
+```
+
+```{r fig.height=8}
+upset_input <- list(T1.upregulated = T1.upregulated,
+                    T1.downregulated = T1.downregulated,
+                    T1.not_in_control = T1.not_in_control,
+                    T1.only_in_control = T1.only_in_control,
+                    T2.upregulated = T2.upregulated,
+                    T2.downregulated = T2.downregulated,
+                    T2.not_in_control = T2.not_in_control,
+                    T2.only_in_control = T2.only_in_control,
+                    T3.upregulated = T3.upregulated,
+                    T3.downregulated = T3.downregulated,
+                    T3.not_in_control = T3.not_in_control,
+                    T3.only_in_control = T3.only_in_control)
+
+upset_metadata <- data.frame(sets = as.vector(names(upset_input)),
+                         Time = rep(c('T1', 'T2', 'T3'), each = 4))
+
+upset_features <- upset(fromList(upset_input), order.by = "freq", cutoff = 1, nsets = 12,
+                    mainbar.y.label = 'Number of shared features', sets.x.label = 'Number of features',
+                    text.scale = c(1.5, 1, 1.5, 1, 1.3, 1.3),
+                    set.metadata = list(data = upset_metadata, 
+                                        plots = list(list(type = 'matrix_rows', column = 'Time', 
+                                                          colors = c(T1 = '#EFC000FF', T2 = '#868686FF', T3 = '#CD534CFF')))))
+upset_features
+
+figure_file <- file.path(figures_dir, 'Upset-KEGG.png')
+png(figure_file, width = 800, height = 800, res = 100)
+upset_features
+dev.off()
+```
+
+## 4.2 Volcano plots
+
+```{r warning=FALSE}
+
+lfc.t <- 2
+pval.t <- 0.05
+
+T1_to_T0_volcano <- plot_volcano(T1_to_T0.diff_table, log2FC, pval, lfc.t, pval.t) +
+  labs(subtitle = 'T1 vs T0')
+T1_to_T0_volcano
+
+figure_file <- file.path(figures_dir, 'T1_T0_volcano.png')
+ggsave(figure_file, T1_to_T0_volcano, dpi = 300)
+
+
+T2_to_T0_volcano <- plot_volcano(T2_to_T0.diff_table, log2FC, pval, lfc.t, pval.t) +
+  labs(subtitle = 'T2 vs T0')
+T2_to_T0_volcano
+
+figure_file <- file.path(figures_dir, 'T2_T0_volcano.png')
+ggsave(figure_file, T2_to_T0_volcano, dpi = 300)
+
+T3_to_T0_volcano <- plot_volcano(T3_to_T0.diff_table, log2FC, pval, lfc.t, pval.t) +
+  labs(subtitle = 'T3 vs T0')
+T3_to_T0_volcano
+
+figure_file <- file.path(figures_dir, 'T3_T0_volcano.png')
+ggsave(figure_file, T3_to_T0_volcano, dpi = 300)
+```
+
+## 4.3 Van Krevelen Diagrams of dysregulated features
+
+**Dysregulated features at T1**
+
+```{r}
+
+T1_vank <- plot_vank(T1.sig, Class, Comment)
+T1_vank
+
+figure_file <- file.path(figures_dir, 'DE_vank_T1.png')
+ggsave(figure_file, T1_vank)
+```
+
+**Dysregulated features at T2**
+
+```{r}
+T2_vank <- plot_vank(T2.sig, Class, Comment)
+T2_vank
+
+figure_file <- file.path(figures_dir, 'DE_vank_T2.png')
+ggsave(figure_file, T2_vank)
+```
+
+**Dysregulated features at T3**
+
+```{r}
+T3_vank <- plot_vank(T3.sig, Class, Comment)
+T3_vank
+
+figure_file <- file.path(figures_dir, 'DE_vank_T3.png')
+ggsave(figure_file, T3_vank)
+```
+
+Van Krevelen of all
+
+```{r}
+
+sig_all <- rbind(T1.sig %>% select(FeatureID, Comment) %>% mutate(Time = 'T1'),
+                 T2.sig %>% select(FeatureID, Comment) %>% mutate(Time = 'T2'),
+                 T3.sig %>% select(FeatureID, Comment) %>% mutate(Time = 'T3'))
+
+sig_all_compounds_table <- compounds_table %>% 
+  select(FeatureID, H_to_C, O_to_C, Time) %>% 
+  distinct() %>% 
+  left_join(sig_all, by = c('FeatureID', 'Time'))
+
+sig_all_compounds_table$Comment <- factor(sig_all_compounds_table$Comment, 
+                                          levels = c('Only present in control', 'Downregulated', 
+                                                     'Upregulated', 'Not present in control',
+                                                     'No dysregulation'))
+
+sig_all_compounds_table$Comment[is.na(sig_all_compounds_table$Comment)] <- 'No dysregulation'
+
+my_colors = c('Not present in control' = '#d8365e', 
+              'Upregulated' = '#d34849',
+              'Downregulated' = '#005193',
+              'Only present in control' = '#4b70de',
+              'No dysregulation' = 'grey')
+
+## Compound class rectangles (for plotting)
+
+classification <- read_csv(file.path(project_dir, 'data', 'compound_class_table.csv'))
+class_rect <-  geom_rect(data = classification,
+                         aes(xmin = OC_low,
+                             xmax = OC_high,
+                             ymin = HC_low,
+                             ymax = HC_high,
+                             color = Class),
+                         fill = NA,
+                         size = 1,
+                         inherit.aes = FALSE, 
+                         linetype = 'dashed') 
+
+dysreg_vk <- ggplot(sig_all_compounds_table,
+                    aes(x = O_to_C,
+                        y = H_to_C,
+                        color = Comment)) +
+  geom_point() +
+  scale_color_manual(values = my_colors) +
+  theme_bw() +
+  labs(x = 'O:C',
+       y = 'H:C',
+       title = 'Van Krevelen Diagram of Labeled Samples ',
+       color = 'Label') +
+  new_scale_color() +
+  class_rect  +
+  scale_color_manual(values = get_palette('d3', 8)) +
+  theme(plot.title = element_text(face = 'bold', hjust = 0.5)) +
+  facet_wrap(~ Time)
+
+dysreg_vk
+
+figure_file <- file.path(figures_dir, 'dysreg_vk.png')
+ggsave(figure_file, dysreg_vk)
+
+```
+
+
+## 4.4 GFE plots of dysregulated features
+
+**Dysregulated features at T1**
+
+```{r}
+
+my_colors = c('Not present in control' = '#d8365e', 
+              'Upregulated' = '#d34849',
+              'Downregulated' = '#005193',
+              'Only present in control' = '#4b70de')
+
+T1_GFE_box <- plot_boxplot(T1.sig, Comment, GFE, Comment, my_colors)
+T1_GFE_box
+
+figure_file <- file.path(figures_dir, 'DE_GFE_T1.png')
+ggsave(figure_file, T1_GFE_box)
+```
+
+**Dysregulated features at T2**
+
+```{r}
+T2_GFE_box <- plot_boxplot(T2.sig, Comment, GFE, Comment, my_colors)
+T2_GFE_box
+
+figure_file <- file.path(figures_dir, 'DE_GFE_T2.png')
+ggsave(figure_file, T2_GFE_box)
+```
+
+**Dysregulated features at T3**
+
+```{r}
+T3_GFE_box <- plot_boxplot(T3.sig, Comment, GFE, Comment, my_colors)
+T3_GFE_box
+
+figure_file <- file.path(figures_dir, 'DE_GFE_T3.png')
+ggsave(figure_file, T3_GFE_box)
+```
+
+
+# 5. Hierarchical clustering analysis using heatmaps
+
+Multiple heatmaps will be plotted, based on the differential expression and if the compounds were or not assigned and structure
+
+### Normalized Area under the curve (AUC) heatmap for all detected features
+
+```{r warning=FALSE}
+
+# Initialize graphical device
+dev.off()
+
+# Set sampleID as row.names to annotate heatmap
+
+col_annot <- column_to_rownames(metadata, var = 'SampleID') %>% 
+  select(-Label)
+mapcolor <- colorRampPalette(brewer.pal(11, 'RdYlBu'))(100)[100:1]
+
+figure_file <- file.path(figures_dir, 'All_features_heatmap.pdf')
+
+annot_colors <- list(
+  Time = c(T0 ='#0073C2FF', T1 = '#EFC000FF', T2 = '#868686FF', T3 = '#CD534CFF'),
+  Comp = c(litter = 'green4', peat_and_litter = 'chocolate4'),
+  Origin = c(LC_MS2 = '#0086cb', NMR = '#d23936'))
+
+# Removing BNC from the heatmaps
+
+norm.matrix <- norm.matrix %>% 
+  select(-BNC)
+
+pdf(figure_file)
+pheatmap(norm.matrix,
+         clustering_distance_rows = 'correlation',
+         clustering_distance_cols = 'correlation',
+         scale = 'row',
+         annotation_col = col_annot,
+         annotation_colors = annot_colors,
+         color = mapcolor,
+         show_rownames = FALSE,
+         cutree_cols = 5,
+         main = 'All features (scaled AUC)'
+)
+dev.off()
+```
+
+[Scaled Area under the curve (AUC) heatmap for all detected features](`r toString(figure_file)`)
+
+### Normalized Area under the curve (AUC) heatmap for only features that were identified
+
+```{r}
+# Extract all features that have names
+named_compounds <- compounds_table %>% 
+  select(FeatureID, Name, name4plot) %>% 
+  filter(!is.na(Name)) %>% 
+  distinct()
+
+# Create a matrix of only identified features
+
+named_compounds.matrix <- norm.matrix[rownames(norm.matrix) %in% named_compounds$FeatureID,]
+row.names(named_compounds.matrix) <- compounds_table$name4plot[match(row.names(named_compounds.matrix), compounds_table$FeatureID)]
+
+```
+
+```{r warning=FALSE}
+
+figure_file <- file.path(figures_dir, 'All_identified_features_heatmap.pdf')
+dev.off()
+pdf(figure_file, width = 15, height = 15)
+pheatmap(named_compounds.matrix,
+         clustering_distance_rows = 'correlation',
+         clustering_distance_cols = 'correlation',
+         scale = 'row',
+         annotation_col = col_annot,
+         annotation_colors = annot_colors,
+         color = mapcolor,
+         cutree_cols = 4,
+         cutree_rows = 5,
+         fontsize_row = 2,
+         main = 'Identified features (scaled AUC)'
+)
+dev.off()
+```
+
+[Scaled Area under the curve (AUC) heatmap for only features that were identified](`r toString(figure_file)`)
+
+### All dysregulated features
+
+```{r}
+# Create an AUC matrix that contains only features that are differentially expressed
+
+sig_features.matrix <- norm.matrix[row.names(norm.matrix) %in% sig_features, ]
+
+row.names(sig_features.matrix) <- compounds_table$name4plot[match(row.names(sig_features.matrix), compounds_table$FeatureID)]
+```
+
+```{r }
+figure_file <- file.path(figures_dir, 'Dysreg_features_heatmap.pdf')
+
+dev.off()
+pdf(figure_file, width = 20, height = 12)
+pheatmap(sig_features.matrix,
+         clustering_distance_rows = 'correlation',
+         cluster_cols = FALSE,
+         scale = 'row',
+         annotation_col = col_annot,
+         annotation_colors = annot_colors,
+         color = mapcolor,
+         cutree_cols = 4,
+         cutree_rows = 3,
+         fontsize_row = 6,
+         main = 'Dysregulated features (scaled AUC)'
+)
+dev.off()
+```
+
+[Scaled Area under the curve (AUC) heatmap for all dysregulated features](`r toString(figure_file)`)
+
+### Dysregulated features that were identified
+
+```{r }
+named_sig_features.matrix <- sig_features.matrix[rownames(sig_features.matrix) %in% named_compounds$Name, ]
+
+figure_file <- file.path(figures_dir, 'Dysreg_identified_features.pdf')
+
+dev.off()
+pdf(figure_file, width = 20, height = 12)
+pheatmap(named_sig_features.matrix,
+         clustering_distance_rows = 'correlation',
+         clustering_distance_cols = 'correlation',
+         scale = 'row',
+         annotation_col = col_annot,
+         annotation_colors = annot_colors,
+         color = mapcolor,
+         cutree_cols = 4,
+         cutree_rows = 3,
+         fontsize_row = 6,
+         main = 'Identified dysregulated features (scaled AUC)'
+)
+dev.off()
+```
+
+[Scaled Area under the curve (AUC) heatmap for identified dysregulated features](`r toString(figure_file)`)
+
+# 6. Hierarchical clustering analysis with added NMR data
+
+## 6.1 Differential analysis of NMR data
+
+```{r}
+
+# The following function will calculate ratio, log2FC, p values and adjusted pvalues. If no replicates are available for EACH treatment
+# please use the get_diff_table_no_pval() function
+
+nmr.matrix[is.na(nmr.matrix)] <- 0
+
+T1_to_T0.nmr <- get_diff_table_no_pval(nmr.matrix, control.sample_list = T0.samples, treatment.sample_list = T1.samples)
+T2_to_T0.nmr <- get_diff_table_no_pval(nmr.matrix, control.sample_list = T0.samples, treatment.sample_list = T2.samples)
+T3_to_T0.nmr <- get_diff_table_no_pval(nmr.matrix, control.sample_list = T0.samples, treatment.sample_list = T3.samples)
+
+```
+
+
+```{r}
+# Join differential NMR data with NMR table
+T1_to_T0.nmr <- nmr_table %>%
+  select(Name, `KEGG Compound ID`, Formula, Weight, InChI) %>% 
+  right_join(T1_to_T0.nmr, by = c('Name' = 'FeatureID')) %>% 
+  filter(!is.nan(log2FC)) %>% 
+  mutate(Comment = case_when(log2FC == Inf ~ 'Not present in control',
+                             log2FC == -Inf ~ 'Only present in control',
+                             log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+T1_to_T0.nmr$Comment <- factor(T1_to_T0.nmr$Comment, 
+                               levels = c('Only present in control', 'Downregulated', 'Upregulated', 'Not present in control' ))
+
+table_file <- file.path(tables_dir, 'Diff_expressed_NMR_T1.csv')
+write_csv(T1_to_T0.nmr, table_file )
+
+T2_to_T0.nmr <- nmr_table %>%
+  select(Name, `KEGG Compound ID`, Formula, Weight, InChI) %>% 
+  right_join(T2_to_T0.nmr, by = c('Name' = 'FeatureID')) %>% 
+  filter(!is.nan(log2FC)) %>% 
+  mutate(Comment = case_when(log2FC == Inf ~ 'Not present in control',
+                             log2FC == -Inf ~ 'Only present in control',
+                             log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+T2_to_T0.nmr$Comment <- factor(T2_to_T0.nmr$Comment, 
+                               levels = c('Only present in control', 'Downregulated', 'Upregulated', 'Not present in control' ))
+
+table_file <- file.path(tables_dir, 'Diff_expressed_NMR_T2.csv')
+write_csv(T2_to_T0.nmr, table_file )
+
+T3_to_T0.nmr <- nmr_table %>%
+  select(Name, `KEGG Compound ID`, Formula, Weight, InChI) %>% 
+  right_join(T3_to_T0.nmr, by = c('Name' = 'FeatureID')) %>% 
+  filter(!is.nan(log2FC)) %>% 
+  mutate(Comment = case_when(log2FC == Inf ~ 'Not present in control',
+                             log2FC == -Inf ~ 'Only present in control',
+                             log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+T3_to_T0.nmr$Comment <- factor(T3_to_T0.nmr$Comment, 
+                               levels = c('Only present in control', 'Downregulated', 'Upregulated', 'Not present in control' ))
+
+table_file <- file.path(tables_dir, 'Diff_expressed_NMR_T3.csv')
+write_csv(T3_to_T0.nmr, table_file )
+```
+
+## 6.2 Heatmaps including NMR data
+
+```{r}
+# Removing BNC from NMR matrix
+
+nmr.matrix <- nmr.matrix %>% 
+  select(-BNC)
+
+# Join NMR data with dysregulated LC data
+sig_nmr.matrix <- rbind(sig_features.matrix, nmr.matrix)
+sig_nmr.matrix[is.na(sig_nmr.matrix)] <- 0
+```
+
+```{r}
+
+row_annot <- tibble(Name = row.names(sig_nmr.matrix)) %>% 
+  mutate(Origin = ifelse(Name %in% row.names(nmr.matrix), 'NMR', 'LC_MS2')) %>% 
+  column_to_rownames(var = 'Name')
+
+figure_file <- file.path(figures_dir, 'Dysreg_features_and_NMR.pdf')
+dev.off()
+pdf(figure_file, width = 20, height = 15)
+pheatmap(sig_nmr.matrix,
+         cluster_cols = FALSE,
+         clustering_distance_cols = 'correlation',
+         scale = 'row',
+         annotation_col = col_annot,
+         annotation_row = row_annot,
+         annotation_colors = annot_colors,
+         color = mapcolor,
+         cutree_cols = 4,
+         cutree_rows = 3,
+         fontsize_row = 6,
+         main = 'Dysregulated features and NMR data'
+)
+dev.off()
+```
+
+[Dysregulated features and NMR data](`r toString(figure_file)`)

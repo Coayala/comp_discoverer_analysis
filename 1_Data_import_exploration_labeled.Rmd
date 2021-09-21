@@ -1,0 +1,744 @@
+---
+title: "Compound discover data analysis"
+author: "Christian Ayala"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+# 1. Importing Libraries
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(readxl)
+library(ggpubr)
+library(ggsci)
+library(ggpolypath)
+library(venn)
+library(rstatix)
+library(UpSetR)
+library(ggnewscale)
+source('functions_cdis_exploration.R')
+```
+
+# 2. Import data
+
+```{r set_path, message=FALSE}
+#set path variables
+project_dir <- getwd()
+
+# Give a name for your project so the results are all grouped together in a directory with the same name
+project_name <- 'Bog_labeled_all'
+figures_dir <- file.path(project_dir, paste0(project_name, '_output_figures'))
+tables_dir <- file.path(project_dir,  paste0(project_name, '_output_tables'))
+
+# Create output directories
+dir.create(figures_dir, showWarnings = FALSE)
+
+dir.create(tables_dir, showWarnings = FALSE)
+```
+
+Set if the data to be used is going to be labeled or unlabeled
+
+```{r}
+# Flag for labeled / unlabeled data, set TRUE or FALSE
+
+label = TRUE
+```
+
+
+The data for in this script is the **Compounds table** table exported from **Compound Discoverer**. For this script to work well please add the **Area** columns to this table, and the **Gap Status**.
+The **metadata table** can be exported directly from the **Samples tab** in **Compound Discoverer** by copying to a blank text file.
+
+
+```{r import_data, message=FALSE}
+# Import data tables
+cd_results_file <- file.path(project_dir, 'data', 'Bog_label_all.xlsx')
+cd_results_table <- read_xlsx(cd_results_file)
+
+# Select columns needed for downstream analysis
+
+cd_results_table <- cd_results_table %>%
+  arrange(desc(`Molecular Weight`)) %>% 
+  mutate(FeatureID = paste0('Feature',formatC(n():0001, width = 4, flag = '0'))) %>%
+  select(FeatureID, Name, Formula, `Molecular Weight`, contains('Annotation source'), contains('Results'),
+         contains('Pathways'), contains('Area:'), contains('Gap Status:'), contains('Labeling Status:'),
+         contains('Rel. Exchange')) %>% 
+  # Differentiate between features that share the same name using "peak#" at the end of the name
+  group_by(Name) %>% 
+  add_count(Name) %>% 
+  
+  # Create variable with names for plotting (useful in following scripts)
+  mutate(name4plot = ifelse(is.na(Name), FeatureID, ifelse(n == 1, Name, paste0(Name, '-peak', n():1)))) %>% 
+  select(-n) %>% 
+  ungroup()
+
+# Import metadata and fix names
+metadata_file <- file.path(project_dir, 'data', 'metadata_bog_label_all.tsv')
+metadata <- read_tsv(metadata_file)
+
+metadata$`Sample Identifier` <- str_remove(metadata$`Sample Identifier`, 'Saleska_')
+metadata$`Sample Identifier` <- str_remove(metadata$`Sample Identifier`, '_23.*')
+
+# Select only the useful columns and fix column names
+
+metadata <- metadata %>% 
+  select(-Error, -Sample, -File) %>% 
+  rename(SampleID = `Sample Identifier`, Label = `Sample Type`)
+
+table_file <- file.path(tables_dir, 'fixed_metadata.csv')
+write_csv(metadata, table_file)
+
+label_metadata <- metadata %>% 
+  filter(Label == 'Labeled')
+
+table_file <- file.path(tables_dir, 'fixed_labeled_metadata.csv')
+write_csv(label_metadata, table_file)
+```
+
+Get the label status of each feature (labeled analysis only)
+
+```{r}
+if(label == TRUE){
+  label_status <- cd_results_table %>% 
+    select(FeatureID, contains('Labeling Status:'), contains('Rel. Exchange')) %>% 
+    pivot_longer(!FeatureID, names_to = c('.value', 'SampleID'), names_pattern = '(.*): (.*)')
+  
+  label_status$SampleID <- str_remove(label_status$SampleID, 'Saleska_')
+  label_status$SampleID <- str_remove(label_status$SampleID, '_23.*')
+  
+  # Detecting only labeled compounds that have no warnings 
+  
+  label_status <- label_status %>% 
+    mutate(label_nw = ifelse(`Labeling Status` == 'No warnings' & `Rel. Exchange [%]` > 0.5, 
+                             'Labeled','Non_labeled'),
+           label_irreg = ifelse((`Labeling Status` == 'No warnings' & `Rel. Exchange [%]` > 0.5) |
+                                  (`Labeling Status` == 'Irregular exchange' & `Rel. Exchange [%]` > 15),
+                                'Labeled','Non_labeled'),
+           label_manual = label_nw) 
+  
+  ## Up to 73
+  manually_bne <- c('Feature0034', 'Feature0162', 'Feature0321', 'Feature0025', 'Feature0310', 'Feature0283', 
+                    'Feature0208', 'Feature0212', 'Feature0257', 'Feature0184', 'Feature0209', 'Feature0279',
+                    'Feature0024', 'Feature0206', 'Feature0302', 'Feature0261', 'Feature0136', 'Feature0305',
+                    'Feature0236', 'Feature0326', 'Feature0037', 'Feature0240', 'Feature0043', 'Feature0255',
+                    'Feature0171', 'Feature0232', 'Feature0158', 'Feature0276', 'Feature0161', 'Feature0183',
+                    'Feature0296', 'Feature0211', 'Feature0229', 'Feature0307', 'Feature0194', 'Feature0131',
+                    'Feature0198', 'Feature0301', 'Feature0061', 'Feature0147', 'Feature0298', 'Feature0297',
+                    'Feature0015', 'Feature0078', 'Feature0293', 'Feature0172', 'Feature0249', 'Feature0284',
+                    'Feature0074', 'Feature0127', 'Feature0132')
+  manually_I_e1 <- c('Feature0308', 'Feature0003', 'Feature0184', 'Feature0027', 'Feature004', 'Feature0286',
+                     'Feature0027', 'Feature0024', 'Feature0255', 'Feature0023', 'Feature0154', 'Feature0030')
+  manually_I_e2 <- c('Feature0308', 'Feature0003', 'Feature0184', 'Feature0027', 'Feature004', 'Feature0286',
+                     'Feature0027', 'Feature0024', 'Feature0157', 'Feature0255', 'Feature0023', 'Feature0154',
+                     'Feature0030')
+  manually_II_e1 <- c('Feature0184', 'Feature0286', 'Feature0027', 'Feature0024', 'Feature0255', 'Feature0141',
+                      'Feature0154', 'Feature0248')
+  manually_II_e2 <- c('Feature0184', 'Feature0286', 'Feature0157', 'Feature0255', 'Feature0298', 'Feature0297',
+                      'Feature0160', 'Feature0248')
+  manually_III_e1 <- c('Feature0212', 'Feature0184', 'Feature004', 'Feature0286', 'Feature0027', 'Feature0024',
+                       'Feature0255', 'Feature0023')
+  manually_III_e2 <- c('Feature0184', 'Feature004', 'Feature0286', 'Feature0027', 'Feature0024', 'Feature0255',
+                       'Feature0023', 'Feature0248')
+  
+  label_status$label_manual[(label_status$FeatureID %in% manually_bne) & 
+                              (label_status$SampleID == 'BNE')] <- 'Labeled'
+  label_status$label_manual[(label_status$FeatureID %in% manually_I_e1) & 
+                              (label_status$SampleID == 'I_Bog_E1')] <- 'Labeled'
+  label_status$label_manual[(label_status$FeatureID %in% manually_I_e2) & 
+                              (label_status$SampleID == 'I_Bog_E2')] <- 'Labeled'
+  label_status$label_manual[(label_status$FeatureID %in% manually_II_e1) & 
+                              (label_status$SampleID == 'II_Bog_E1')] <- 'Labeled'
+  label_status$label_manual[(label_status$FeatureID %in% manually_II_e2) & 
+                              (label_status$SampleID == 'II_Bog_E2')] <- 'Labeled'
+  label_status$label_manual[(label_status$FeatureID %in% manually_III_e1) & 
+                              (label_status$SampleID == 'III_Bog_E1')] <- 'Labeled'
+  label_status$label_manual[(label_status$FeatureID %in% manually_III_e2) & 
+                              (label_status$SampleID == 'III_Bog_E2')] <- 'Labeled'
+  
+  
+  label_status$label_nw <- factor(label_status$label_nw, levels = c('Non_labeled', 'Labeled'))
+  label_status$label_irreg <- factor(label_status$label_irreg, levels = c('Non_labeled', 'Labeled'))
+  label_status$label_manual <- factor(label_status$label_manual, levels = c('Non_labeled', 'Labeled'))
+  
+  table_file <- file.path(tables_dir, 'label_status.csv')
+  write_csv(label_status, table_file)
+  
+  label_plot <- label_status %>% 
+    pivot_longer(contains('label_'), names_to = 'detection', values_to = 'label_status') %>% 
+    filter(detection != 'label_irreg') %>% 
+    group_by(SampleID, detection) %>% 
+    count(label_status) %>% 
+    #filter(detection == 'label_nw') %>% 
+    ggplot() +
+    geom_col(aes(x = SampleID,
+                 y = n,
+                 fill = label_status)) +
+    scale_fill_manual(values = c(Labeled = '#ffb639', Non_labeled = '#006889')) +
+    theme_bw() +
+    labs(y = 'Counts',
+         title = 'Number of labeled compounds per sample') +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          plot.title = element_text(face = 'bold', hjust = 0.5),
+          plot.subtitle = element_text(face = 'italic', hjust = 0.5)) +
+    facet_wrap(~ detection, labeller = as_labeller(c(label_manual = 'Manually curated',
+                                                     label_nw = 'Only compounds with no warnings')))
+
+  label_plot
+  
+  figure_file <- file.path(figures_dir, 'label_status.png')
+  ggsave(figure_file, label_plot, dpi = 300)
+  
+}
+```
+
+
+
+# 3. Data Manipulation and thermodynamic indices calculations
+
+```{r data, message=FALSE, warning=FALSE}
+
+# Split formula column into elemental counts
+cd_results_table <- separate_formula(cd_results_table)
+
+# Calculate ratios and thermodynamic indices
+cd_results_table <- calc_ratios_n_idxs(cd_results_table)
+
+# Calculate classes
+cd_results_table <- calc_classes(cd_results_table)
+
+# Gather area under the curve (AUC) values per sample
+
+compounds_table <- cd_results_table %>%
+  select(-contains('Gap Status:'), -contains('Labeling Status:'), -contains('Rel. Exchange')) %>% 
+  gather(contains('Area:'), key = 'SampleID', value = 'AUC') %>% 
+  filter(AUC > 0)
+compounds_table$SampleID <- str_remove(compounds_table$SampleID, 'Area: Saleska_')
+compounds_table$SampleID <- str_remove(compounds_table$SampleID, '_23.*')
+
+# Save gap-filled table to be used in Statistical Analysis
+
+table_file <- file.path(tables_dir, 'gap_filled_compounds_table.csv')
+write_csv(compounds_table, table_file)
+
+```
+
+### Gap filtering (only for unlabel data)
+
+```{r}
+
+# Gather "Gap Status" for filtering 
+if(label == FALSE){
+  gap_status <- cd_results_table %>% 
+    select(FeatureID, contains('Gap Status:')) %>% 
+    gather(contains('Gap Status:'), key = 'SampleID', value = 'gap_status')
+  gap_status$SampleID <- str_remove(gap_status$SampleID, 'Gap Status: Saleska_')
+  gap_status$SampleID <- str_remove(gap_status$SampleID, '_23.*')
+  
+  ## Filtering
+  
+  compounds_table <- left_join(compounds_table, gap_status, by = c('FeatureID', 'SampleID')) %>% 
+    filter(gap_status != 'Full gap')
+}
+
+```
+
+
+``` {r}
+# Add metadata information
+
+compounds_table <- left_join(compounds_table, metadata, by = 'SampleID')
+
+table_file <- file.path(tables_dir, 'compounds_table.csv')
+write_csv(compounds_table, table_file)
+
+```
+
+Get a table of only labeled compounds
+
+```{r}
+labeled_compounds_table <- compounds_table %>% 
+  left_join(label_status, by = c('FeatureID', 'SampleID')) %>% 
+  filter(label_manual == 'Labeled') %>% 
+  select(-`Rel. Exchange [%]`, -label_irreg, -label_nw, -`Labeling Status`, label_manual) %>% 
+  distinct()
+
+table_file <- file.path(tables_dir, 'labeled_compounds_table.csv')
+write_csv(labeled_compounds_table, table_file)
+
+unlabeled_compounds_table <- compounds_table %>% 
+  left_join(label_status, by = c('FeatureID', 'SampleID')) %>% 
+  filter(label_manual == 'Non_labeled') %>% 
+  select(-`Rel. Exchange [%]`, -label_irreg, -label_nw, -`Labeling Status`, label_manual) %>% 
+  distinct()
+
+table_file <- file.path(tables_dir, 'unlabeled_compounds_table.csv')
+write_csv(unlabeled_compounds_table, table_file)
+
+
+
+# For differential analysis only
+
+labeled_compounds_table_in_all <- compounds_table %>% 
+  left_join(label_status, by = c('FeatureID', 'SampleID')) %>% 
+  filter(FeatureID %in% labeled_compounds_table$FeatureID) %>% 
+  select(-`Rel. Exchange [%]`, -label_irreg, -label_nw, -`Labeling Status`) %>% 
+  distinct()
+
+table_file <- file.path(tables_dir, 'labeled_compounds_table_in_all.csv')
+write_csv(labeled_compounds_table_in_all, table_file)
+
+
+```
+
+
+# 4. Summary plots
+
+## 4.1.1 Number of identified compounds
+
+This figure shows the number of compounds that were detected in each file, and how many of them were assigned a structure through database searches
+
+```{r n_identified_masses, message=FALSE}
+# Create a new tibble to count the number of compounds per file
+summary_table <- compounds_table %>% 
+  select(SampleID, Name)
+
+# Compounds with names are the ones that have an assigned structure
+
+summary_table$Name <- ifelse(is.na(summary_table$Name), 'No structure', 'With structure')
+
+summary_table <- summary_table %>% 
+  group_by(SampleID) %>% 
+  count(Name)
+
+colnames(summary_table) <- c('SampleID', 'Status', 'n')
+
+# Join summary table with metadata information
+
+summary_table <- left_join(summary_table, metadata, by = c('SampleID'))
+
+summary_table$Status <- factor(summary_table$Status, levels = c('No structure', 'With structure'))
+
+id_summary_plot <- plot_col(summary_table, SampleID, n, Status) +
+  labs(title = 'Number of masses found',
+       x = 'Sample name',
+       y = 'Count') +
+  theme(plot.title = element_text(face = 'bold', hjust = 0.5),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1))
+
+id_summary_plot
+
+figure_file <- file.path(figures_dir, 'id_summary.png')
+ggsave(figure_file, id_summary_plot, dpi = 300)
+
+```
+
+## 4.1.2 Number of labeled identified compounds
+
+This figure shows the number of compounds that were detected in each file, and how many of them were assigned a structure through database searches
+
+```{r, message=FALSE}
+# Create a new tibble to count the number of compounds per file
+summary_table <- labeled_compounds_table %>% 
+  select(SampleID, Name)
+
+# Compounds with names are the ones that have an assigned structure
+
+summary_table$Name <- ifelse(is.na(summary_table$Name), 'No structure', 'With structure')
+
+summary_table <- summary_table %>% 
+  group_by(SampleID) %>% 
+  count(Name)
+
+colnames(summary_table) <- c('SampleID', 'Status', 'n')
+
+# Join summary table with metadata information
+
+summary_table <- left_join(summary_table, metadata, by = c('SampleID'))
+
+summary_table$Status <- factor(summary_table$Status, levels = c('No structure', 'With structure'))
+
+id_summary_plot <- plot_col(summary_table, SampleID, n, Status) +
+  labs(title = 'Number of labeled masses found',
+       x = 'Sample name',
+       y = 'Count') +
+  theme(plot.title = element_text(face = 'bold', hjust = 0.5),
+        axis.text.x = element_text(angle = 45,
+                                   hjust = 1))
+
+id_summary_plot
+
+figure_file <- file.path(figures_dir, 'labeled_id_summary.png')
+ggsave(figure_file, id_summary_plot, dpi = 300)
+```
+
+## 4.2. Upset plots of number of detected compounds
+
+By time
+
+```{r venn_time, message=FALSE}
+
+# Venn diagram of the compounds present in each time
+T0_list <- unique(get_vectors(compounds_table, 'Time', 'T0', 'FeatureID'))
+
+T1_list <- unique(get_vectors(compounds_table, 'Time', 'T1', 'FeatureID'))
+
+T2_list <- unique(get_vectors(compounds_table, 'Time', 'T2', 'FeatureID'))
+
+T3_list <- unique(get_vectors(compounds_table, 'Time', 'T3', 'FeatureID'))
+
+my_list <- list(T0 = T0_list,
+                T1 = T1_list,
+                T2 = T2_list,
+                T3 = T3_list)
+
+figure_file <- file.path(figures_dir, 'upset_time.png')
+png(figure_file, res = 120, width = 800, height = 800)
+upset(fromList(my_list), sets = c('T3', 'T2', 'T1', 'T0'), order.by = "freq", keep.order = TRUE)
+dev.off()
+```
+
+
+```{r venn_label, message=FALSE}
+
+# Venn diagram of the compounds present in each time
+
+my_list <- list()
+for(i in label_metadata$SampleID){
+  temp <- unique(get_vectors(labeled_compounds_table, 'SampleID', i, 'FeatureID'))
+  my_list <- append(my_list, list(temp))
+}
+names(my_list) <- label_metadata$SampleID
+
+
+figure_file <- file.path(figures_dir, 'upset_label.png')
+png(figure_file, res = 120, width = 800, height = 800)
+upset(fromList(my_list), sets = rev(label_metadata$SampleID), order.by = "freq", keep.order = TRUE)
+dev.off()
+```
+
+## 4.3 KEGG Pathways
+
+```{r}
+# Top KEGG pathways identified
+
+kegg <- compounds_table %>% 
+  select(colnames(metadata), `KEGG Pathways`) %>% 
+  separate_rows(`KEGG Pathways`, sep = ';') %>% 
+  group_by(SampleID) %>% 
+  count(`KEGG Pathways`) %>% 
+  drop_na(`KEGG Pathways`) %>% 
+  left_join(metadata, by = 'SampleID')
+
+kegg_plot <- plot_col(kegg, n, `KEGG Pathways`, Time, dodge = TRUE) +
+  facet_wrap(~ SampleID) +
+  labs(title = 'KEGG Pathways annotated in each sample')
+kegg_plot
+
+figure_file <- file.path(figures_dir, 'kegg_pathways.jpg')
+ggsave(figure_file, kegg_plot, dpi = 300)
+
+```
+
+### 4.3.1 KEGG Pathways of Labeled compounds
+
+```{r}
+
+kegg_labeled <- labeled_compounds_table %>%
+  select(colnames(label_metadata), `KEGG Pathways`) %>% 
+  separate_rows(`KEGG Pathways`, sep = ';') %>% 
+  group_by(SampleID) %>% 
+  count(`KEGG Pathways`) %>% 
+  drop_na(`KEGG Pathways`) %>% 
+  left_join(label_metadata, by = 'SampleID')
+
+kegg_plot_l <- plot_col(kegg_labeled, n, `KEGG Pathways`, Time, dodge = TRUE) +
+  facet_wrap(~ SampleID) +
+  labs(title = 'KEGG Pathways annotated in each sample')
+kegg_plot_l
+
+figure_file <- file.path(figures_dir, 'labeled_kegg_pathways.jpg')
+ggsave(figure_file, kegg_plot, dpi = 300)
+
+```
+
+
+## 4.4 Metabolika Pathways
+
+```{r}
+# Top Metabolika pathways identified
+
+metabolika <- compounds_table %>% 
+  select(colnames(metadata), `Metabolika Pathways`) %>% 
+  separate_rows(`Metabolika Pathways`, sep = ';') %>% 
+  group_by(SampleID) %>% 
+  count(`Metabolika Pathways`) %>% 
+  drop_na(`Metabolika Pathways`) %>% 
+  left_join(metadata, by = 'SampleID')
+
+metabolika$`Metabolika Pathways` <- str_remove(metabolika$`Metabolika Pathways`, '\\(.*\\)')
+
+metabolika_plot <- plot_col(metabolika, n, `Metabolika Pathways`, Time, dodge = TRUE) +
+  facet_wrap(~ SampleID, drop = TRUE)
+metabolika_plot
+
+figure_file <- file.path(figures_dir, 'metabolika_pathways.jpg')
+ggsave(figure_file, metabolika_plot, dpi = 300)
+
+```
+
+### 4.4.1 Metabolika Pathways of Labeled compounds
+
+```{r}
+# Top Metabolika pathways identified
+
+metabolika <- labeled_compounds_table %>% 
+  select(colnames(label_metadata), `Metabolika Pathways`) %>% 
+  separate_rows(`Metabolika Pathways`, sep = ';') %>% 
+  group_by(SampleID) %>% 
+  count(`Metabolika Pathways`) %>% 
+  drop_na(`Metabolika Pathways`) %>% 
+  left_join(label_metadata, by = 'SampleID')
+
+metabolika$`Metabolika Pathways` <- str_remove(metabolika$`Metabolika Pathways`, '\\(.*\\)')
+
+metabolika_plot <- plot_col(metabolika, n, `Metabolika Pathways`, Time, dodge = TRUE) +
+  facet_wrap(~ SampleID, drop = TRUE)
+metabolika_plot
+
+figure_file <- file.path(figures_dir, 'metabolika_pathways.jpg')
+ggsave(figure_file, metabolika_plot, dpi = 300)
+
+```
+
+### 4.4.1 Metabolika Pathways of Labeled compounds
+
+```{r}
+
+metabolika <- labeled_compounds_table %>% 
+  select(colnames(metadata), `Metabolika Pathways`) %>% 
+  separate_rows(`Metabolika Pathways`, sep = ';') %>% 
+  group_by(Time, Label) %>% 
+  count(`Metabolika Pathways`) %>% 
+  drop_na(`Metabolika Pathways`)
+
+metabolika$`Metabolika Pathways` <- str_remove(metabolika$`Metabolika Pathways`, '\\(.*\\)')
+
+metabolika_plot <- plot_col(metabolika, n, `Metabolika Pathways`, Time, dodge = TRUE) +
+  facet_wrap(~ Label)
+metabolika_plot
+
+figure_file <- file.path(figures_dir, 'labeled_metabolika_pathways.jpg')
+ggsave(figure_file, metabolika_plot, dpi = 300)
+
+```
+
+
+# 5. Exploratory plots
+
+The following analysis will be all done using only the labeled compounds
+
+## 5.1. Van Krevelen Diagrams
+
+Van Krevelen diagrams faceted by different parameters
+
+
+```{r vank_plot_time, message=FALSE}
+
+# Ven Krevelen Diagram based on time
+vank_time <- plot_vank(labeled_compounds_table, Class, Time)
+vank_time
+
+figure_file <- file.path(figures_dir, 'labeled_Venk_diagram_time.jpg')
+ggsave(figure_file, vank_time, dpi = 300)
+
+```
+
+```{r vank_material, message=FALSE}
+
+# Ven Krevelen Diagram based on type of organic material
+vank_material <- plot_vank(labeled_compounds_table, Class, Comp)
+vank_material
+
+figure_file <- file.path(figures_dir, 'labeled_Venk_diagram_material.jpg')
+ggsave(figure_file, vank_material, dpi = 300)
+
+```
+
+## 5.2 Van Krevelen diagrams per sample showing labeled compounds
+
+```{r}
+
+label_list <- metadata %>% 
+  filter(Label == 'Labeled') %>% 
+  pull(SampleID)
+
+labeled_compounds_table_no_filt <- compounds_table %>% 
+  left_join(label_status, by = c('FeatureID', 'SampleID')) %>% 
+  distinct() %>% 
+  filter(SampleID %in% label_list)
+
+
+classification <- read_csv(file.path(project_dir, 'data', 'compound_class_table.csv'))
+
+## Compound class rectangles (for plotting)
+
+class_rect <-  geom_rect(data = classification,
+                         aes(xmin = OC_low,
+                             xmax = OC_high,
+                             ymin = HC_low,
+                             ymax = HC_high,
+                             color = Class),
+                         fill = NA,
+                         size = 1.5,
+                         inherit.aes = FALSE, 
+                         linetype = 'dashed') 
+
+
+vk_plot_labeled <- ggplot(labeled_compounds_table_no_filt,
+                          aes(x = O_to_C,
+                              y = H_to_C,
+                              color = label_nw)) +
+  scale_color_manual(values = c(Non_labeled = 'gray', Labeled = 'Red')) +
+  geom_point() +
+  theme_bw() +
+  labs(x = 'O:C',
+       y = 'H:C',
+       title = 'Van Krevelen Diagram of Labeled Samples ',
+       color = 'Label') +
+  new_scale_color() +
+  class_rect  +
+  scale_color_manual(values = get_palette('d3', 8)) +
+  theme(plot.title = element_text(face = 'bold', hjust = 0.5)) +
+  facet_wrap(~ SampleID)
+
+vk_plot_labeled
+
+figure_file <- file.path(figures_dir, 'labeled_sampleid_vank.jpg')
+ggsave(figure_file, vk_plot_labeled, dpi = 300, height = 8)
+```
+
+
+## 5.3 Thermodynamic index of labeled compounds
+
+### Gibbs Free Energy
+
+```{r}
+
+stats_table <- labeled_compounds_table %>% 
+  wilcox_test(GFE ~ SampleID) %>% 
+  add_y_position()
+
+box <- ggplot(labeled_compounds_table,
+                  aes(x = SampleID,
+                      y = GFE,
+                      fill = Time)) +
+  geom_boxplot() +
+  stat_pvalue_manual(stats_table, hide.ns = TRUE, 
+                     inherit.aes = FALSE,
+                     label = 'p.adj.signif') +
+  labs(title = 'Gibbs Free Energy of Labeled Compounds') +
+  theme_bw() +
+  theme(plot.title = element_text(face = 'bold',
+                                  hjust = 0.5))
+  
+
+box
+
+figure_file <- file.path(figures_dir, 'labeled_gfe_boxplot.jpg')
+ggsave(figure_file, box, dpi = 300)
+
+```
+
+### NOSC
+
+```{r}
+
+stats_table <- labeled_compounds_table %>% 
+  wilcox_test(NOSC ~ SampleID) %>% 
+  add_y_position()
+
+box <- ggplot(labeled_compounds_table,
+                  aes(x = SampleID,
+                      y = NOSC,
+                      fill = Time)) +
+  geom_boxplot() +
+  stat_pvalue_manual(stats_table, hide.ns = TRUE, 
+                     inherit.aes = FALSE,
+                     label = 'p.adj.signif') +
+  labs(title = 'NOSC of Labeled Compounds') +
+  theme_bw() +
+  theme(plot.title = element_text(face = 'bold',
+                                  hjust = 0.5))
+  
+
+box
+
+figure_file <- file.path(figures_dir, 'labeled_nosc_boxplot.jpg')
+ggsave(figure_file, box, dpi = 300)
+
+```
+
+### DBE
+
+```{r}
+
+stats_table <- labeled_compounds_table %>% 
+  wilcox_test(DBE ~ SampleID) %>% 
+  add_y_position()
+
+box <- ggplot(labeled_compounds_table,
+                  aes(x = SampleID,
+                      y = DBE,
+                      fill = Time)) +
+  geom_boxplot() +
+  stat_pvalue_manual(stats_table, hide.ns = TRUE, 
+                     inherit.aes = FALSE,
+                     label = 'p.adj.signif') +
+  labs(title = 'DBE of Labeled Compounds') +
+  theme_bw() +
+  theme(plot.title = element_text(face = 'bold',
+                                  hjust = 0.5))
+  
+
+box
+
+figure_file <- file.path(figures_dir, 'labeled_dbe_boxplot.jpg')
+ggsave(figure_file, box, dpi = 300)
+
+```
+
+### AI_mod
+
+```{r}
+
+stats_table <- labeled_compounds_table %>% 
+  wilcox_test(AI_mod ~ SampleID) %>% 
+  add_y_position()
+
+box <- ggplot(labeled_compounds_table,
+                  aes(x = SampleID,
+                      y = AI_mod,
+                      fill = Time)) +
+  geom_boxplot() +
+  stat_pvalue_manual(stats_table, hide.ns = TRUE, 
+                     inherit.aes = FALSE,
+                     label = 'p.adj.signif') +
+  labs(title = 'Aromaticity Index of Labeled Compounds') +
+  theme_bw() +
+  theme(plot.title = element_text(face = 'bold',
+                                  hjust = 0.5))
+  
+
+box
+
+figure_file <- file.path(figures_dir, 'labeled_ai_mod_boxplot.jpg')
+ggsave(figure_file, box, dpi = 300)
+
+```
+

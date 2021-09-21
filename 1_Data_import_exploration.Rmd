@@ -63,10 +63,11 @@ cd_results_table <- cd_results_table %>%
   arrange(desc(`Molecular Weight`)) %>% 
   mutate(FeatureID = paste0('Feature',formatC(n():0001, width = 4, flag = '0'))) %>%
   select(FeatureID, Name, Formula, `Molecular Weight`, contains('Annotation source'), contains('Results'), contains('Pathways'), 
-         contains('Area:'), contains('Gap Status:')) %>% 
+         contains('Area:'), contains('Gap Status:'), contains('Labeling Status:')) %>% 
   # Differentiate between features that share the same name using "peak#" at the end of the name
   group_by(Name) %>% 
   add_count(Name) %>% 
+  
   # Create variable with names for plotting (useful in following scripts)
   mutate(name4plot = ifelse(is.na(Name), FeatureID, ifelse(n == 1, Name, paste0(Name, '-peak', n():1)))) %>% 
   select(-n) %>% 
@@ -89,6 +90,25 @@ table_file <- file.path(tables_dir, 'fixed_metadata.csv')
 write_csv(metadata, table_file)
 ```
 
+Get the label status of each feature (labeled analysis only)
+
+```{r}
+if(label == TRUE){
+  label_status <- cd_results_table %>% 
+    select(FeatureID, contains('Labeling Status:'))
+  
+  colnames(label_status) <- str_remove(colnames(label_status), 'Saleska_')
+  colnames(label_status) <- str_remove(colnames(label_status), '_23.*')
+  
+  label_status[label_status == 'Contaminating mass' | label_status == 'Low pattern fit' | label_status == 'Not detected'] <- 'Unlabeled'
+  label_status[label_status == 'No warnings' | label_status == 'Irregular exchange' ] <- 'Labeled'
+  
+  table_file <- file.path(tables_dir, 'label_status.csv')
+  write_csv(label_status, table_file)
+}
+```
+
+
 
 # 3. Data Manipulation and thermodynamic indices calculations
 
@@ -106,7 +126,7 @@ cd_results_table <- calc_classes(cd_results_table)
 # Gather area under the curve (AUC) values per sample
 
 compounds_table <- cd_results_table %>% 
-  select(-contains('Gap Status:')) %>% 
+  select(-contains('Gap Status:'), -contains('Labeling Status:')) %>% 
   gather(contains('Area:'), key = 'SampleID', value = 'AUC') %>% 
   filter(AUC > 0)
 compounds_table$SampleID <- str_remove(compounds_table$SampleID, 'Area: Saleska_')

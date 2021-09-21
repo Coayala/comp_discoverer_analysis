@@ -1,4 +1,4 @@
-
+#
 # Christian Ayala
 # Functions for Data normalization and statistics
 #
@@ -20,7 +20,7 @@ global.norm <- function(matrix, transform_data = TRUE){
   colnames(norm.matrix) <- colnames(matrix)
   rownames(norm.matrix) <- rownames(matrix)
   if(transform_data == TRUE){
-    norm.matrix <- log10(norm.matrix + 1)
+    norm.matrix <- log2(norm.matrix + 1)
   }
   
   return(norm.matrix)
@@ -40,7 +40,7 @@ median.norm <- function(matrix, transform_data = TRUE){
   colnames(norm.matrix) <- colnames(matrix)
   rownames(norm.matrix) <- rownames(matrix)
   if(transform_data == TRUE){
-    norm.matrix <- log10(norm.matrix + 1)
+    norm.matrix <- log2(norm.matrix + 1)
   }
   return(norm.matrix)
 } 
@@ -58,7 +58,7 @@ mean.norm <- function(matrix, transform_data = TRUE){
   colnames(norm.matrix) <- colnames(matrix)
   rownames(norm.matrix) <- rownames(matrix)
   if(transform_data == TRUE){
-    norm.matrix <- log10(norm.matrix + 1)
+    norm.matrix <- log2(norm.matrix + 1)
   }
   return(norm.matrix)
 } 
@@ -81,6 +81,24 @@ cycloess.norm <- function(matrix){
     rownames(norm.matrix) <- rownames(matrix)
     return(norm.matrix)
 }
+
+# -------------------------------------------------------------------------
+
+max.norm <- function(matrix, transform_data = TRUE){
+  # This function will perform data normalization based in the  max AUC of each sample
+  
+  colmax <- apply(matrix, 2, FUN = max, na.rm = TRUE)
+  norm.matrix <- data.frame(matrix(NA, nrow = nrow(matrix), ncol = ncol(matrix)))
+  for(col in 1:ncol(matrix)){
+    norm.matrix[,col] <- (matrix[,col] / colmax[col])
+  }
+  colnames(norm.matrix) <- colnames(matrix)
+  rownames(norm.matrix) <- rownames(matrix)
+  if(transform_data == TRUE){
+    norm.matrix <- log2(norm.matrix + 1)
+  }
+  return(norm.matrix)
+} 
 
 # -------------------------------------------------------------------------
 plot_boxplot <- function(df, my_x, my_y, color_by){
@@ -164,7 +182,7 @@ plot_nmds <- function(df, color_by, shape_by = NULL){
              y = NMDS2,
              color = {{color_by}},
              shape = {{shape_by}})) +
-    geom_jitter(size = 3) +
+    geom_jitter(size = 3, width = 0.01) +
     scale_color_jama() +
     theme_bw() +
     theme(plot.title = element_text(face = 'bold', hjust = 0.5))

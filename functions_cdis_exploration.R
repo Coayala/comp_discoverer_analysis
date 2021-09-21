@@ -269,3 +269,18 @@ plot_density <- function(df, my_x, color_by, facet_by = NULL, facet_by2 = NULL){
     theme(axis.title.y = element_blank()) +
     theme(plot.title = element_text(face = 'bold', hjust = 0.5))
 }
+
+# -------------------------------------------------------------------------
+get_vectors <- function(df, filter_by, value, get_col){
+  # Column where the value will be filtered
+  filter_col <- syms({{filter_by}})
+  
+  # Column that will be retrieved
+  get <- syms({{get_col}})
+  
+  vector <- df %>% 
+    filter((!!! filter_col) == value) %>% 
+    pull((!!! get))
+  
+  return(vector)
+}

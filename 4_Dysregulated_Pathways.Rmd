@@ -96,6 +96,12 @@ kegg_table <- kegg_table %>%
   fill(PathwayID, Pathway_Name, .direction = 'down') %>% 
   filter(!is.na(`Molecular Weight`)) %>% 
   select(-`Molecular Weight`)
+
+comp_kegg <- left_join(compounds_table, kegg_table, by = c('Name', 'Formula')) %>% 
+  distinct()
+
+table_file <- file.path(tables_dir, 'Compounds_with_KEGG.csv')
+write_csv(comp_kegg, table_file)
 ```
 
 # 3. Analyze KEGG Pathways annotated at each time point
@@ -204,7 +210,12 @@ lcms_kegg <- pivot_longer(lcms_kegg, cols = 2:6, names_to = 'Source', values_to 
 
 lcms_kegg <- ddply(lcms_kegg, .(Source), transform, rescale = rescale(n))
 
-kegg_heatmap <- ggplot(lcms_kegg,
+table_file <- file.path(tables_dir, 'only_pathways.csv')
+pathways <- read_csv(table_file)
+
+lcms_kegg_filt <- lcms_kegg[lcms_kegg$Pathway_Name %in% pathways$Pathway_Name,]
+
+kegg_heatmap <- ggplot(lcms_kegg_filt,
                        aes(x = Source,
                            y = Pathway_Name,
                            fill = rescale)) +
@@ -355,7 +366,7 @@ T1_all_counts <- T1.kegg %>%
   group_by(Comment) %>% 
   count(Pathway_Name) %>% 
   ungroup() %>% 
-  filter(n > 1) %>%
+  filter(n > 2) %>%
   mutate(Time = 'T1')
 
 T2_all_counts <- T2.kegg %>% 
@@ -364,7 +375,7 @@ T2_all_counts <- T2.kegg %>%
   group_by(Comment) %>% 
   count(Pathway_Name) %>% 
   ungroup() %>% 
-  filter(n > 1) %>%
+  filter(n > 2) %>%
   mutate(Time = 'T2')
 
 T3_all_counts <- T3.kegg %>% 
@@ -373,7 +384,7 @@ T3_all_counts <- T3.kegg %>%
   group_by(Comment) %>% 
   count(Pathway_Name) %>% 
   ungroup() %>% 
-  filter(n > 1) %>%
+  filter(n > 2) %>%
   mutate(Time = 'T3')
 
 all_kegg <- rbind(T1_all_counts, T2_all_counts, T3_all_counts) %>% 
@@ -384,24 +395,41 @@ all_kegg <- pivot_wider(all_kegg, names_from = Source, values_from = n)
 
 all_kegg[is.na(all_kegg)] <- 0
 
-all_kegg <- pivot_longer(all_kegg, cols = 2:12, names_to = 'Source', values_to = 'n')
+all_kegg <- pivot_longer(all_kegg, cols = 2:ncol(all_kegg), names_to = 'Source', values_to = 'n')
 
 all_kegg <- ddply(all_kegg, .(Source), transform, rescale = rescale(n))
 
-kegg_all_heatmap <- ggplot(all_kegg,
-                       aes(x = Source,
-                           y = Pathway_Name,
-                           fill = rescale)) +
-  geom_tile(color = 'white') +
+table_file <- file.path(tables_dir, 'KEGG_Pathways_NMR_LC.csv')
+write_csv(all_kegg, table_file)
+
+filt_kegg <- all_kegg[all_kegg$Pathway_Name %in% pathways$Pathway_Name,]
+rectangles <- tibble(xmin = c(rep(0.5, 3)),
+                     xmax = c(rep(10.5, 3)),
+                     ymin = c(24.5, 15.5, 11.5),
+                     ymax = c(22.5, 13.5, 9.5))
+
+kegg_all_heatmap <- ggplot(filt_kegg) +
+  geom_tile(aes(x = Source,
+                y = Pathway_Name,
+                fill = rescale),
+            color = 'white') +
   coord_fixed() +
   scale_fill_distiller(palette = 'Blues', direction = 1) +
   theme_bw() +
   theme(plot.title = element_text(face = 'bold', hjust = 0.5),
-        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
         axis.title.x = element_blank()) +
   labs(title = 'Dysregulated KEGG Pathways',
        y = 'Pathway Name',
-       fill = 'Scaled counts')
+       fill = 'Scaled counts') +
+  geom_rect(data = rectangles,
+            aes(xmin = xmin,
+                xmax = xmax,
+                ymin = ymin,
+                ymax = ymax),
+            color = 'red',
+            fill = NA,
+            size = 1) 
 kegg_all_heatmap
 
 figure_file <- file.path(figures_dir, 'KEGG_tile_heatmap_all_data.png')

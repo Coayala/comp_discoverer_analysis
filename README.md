@@ -7,3 +7,5 @@ Clone this repository to start using them
 ```
 git clone https://github.com/Coayala/comp_discoverer_analysis.git
 ```
+
+Scripts with the name ending in labeled are used to analyze lableded data.
