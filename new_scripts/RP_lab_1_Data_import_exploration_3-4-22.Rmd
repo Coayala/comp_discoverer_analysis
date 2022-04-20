@@ -48,7 +48,7 @@ label = FALSE
 ```
 
 
-The data for in this script is the **Compounds table** table exported from **Compound Discoverer**. For this script to work well please add the **Area** columns to this table, and the **Gap Status**.
+The data for in this script is the **Compounds table** table exported from **Compound Discoverer**. For this script to work export and excel table with the columns: **Name**, **Formula**, **Annot. deltaMass [ppm]**, **Calc. MW**, **RT [min]**, **MS2**, **Area**, **Gap Status** and **Gap Fill Status**.
 The **metadata table** can be exported directly from the **Samples tab** in **Compound Discoverer** by copying to a blank text file.
 
 
