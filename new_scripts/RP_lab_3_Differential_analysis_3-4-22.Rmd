@@ -1,0 +1,695 @@
+---
+title: "RP Lab Incubations - Differential Analysis"
+author: "Christian Ayala & Viviana Freire"
+date: "3/19/2021"
+output: html_document
+---
+
+This Notebook is to perform the differential analysis of the normalized AUC from *Compound Discoverer*.
+
+# 1. Importing Libraries
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggrepel)
+library(ggsci)
+library(pheatmap)
+library(RColorBrewer)
+library(readxl)
+library(UpSetR)
+library(ggnewscale)
+library(ggpubr)
+library(DiagrammeR)
+source('functions_cdis_diff.R')
+source('functions_cdis_exploration.R')
+```
+
+# 2. Import data
+
+Set if the data to be used is going to be labeled or unlabeled
+
+```{r}
+# Flag for labeled / unlabeled data, set TRUE or FALSE
+
+label = FALSE
+```
+
+Because differential analysis includes the calculations of means, the data to be used in this section is the normalized untransformed data
+
+```{r set_path, message=FALSE, warning=FALSE}
+# set path variables
+project_dir <- getwd()
+project_name <- 'RP_lab_3-4-22'
+figures_dir <- file.path(project_dir, paste0(project_name, '_output_figures'))
+tables_dir <- file.path(project_dir,  paste0(project_name, '_output_tables'))
+norm_auc_table_file <- file.path(tables_dir, 'normalized_transformed_auc_table.csv')
+
+# If the flag was setted before, nothing needs to be changed here, the correct file will be automatically used
+if(label == TRUE){
+  compounds_table_file <- file.path(tables_dir, 'compounds_table.csv')
+}else{
+  compounds_table_file <- file.path(tables_dir, 'gap_filled_compounds_table.csv')
+}
+
+# Load auc_table
+
+norm.matrix <- read_csv(norm_auc_table_file) %>% 
+  column_to_rownames(var = '...1')
+
+# Load compounds table and add a column that has names for identified compounds and FeatureID for the rest (for plotting purpouses)
+
+compounds_table <- read_csv(compounds_table_file)
+
+# Import metadata and fix names
+metadata_file <- file.path(tables_dir, 'fixed_metadata.csv')
+metadata <- read_csv(metadata_file) %>% 
+  mutate(time2 = case_when(time == 'T0' ~ 'Before WP',
+                           time == 'T1' ~ '24h after WP',
+                           TRUE ~ '>24h after WP'),
+         time2 = factor(time2, levels = c('Before WP', '24h after WP', '>24h after WP')))
+
+```
+
+# 3. Calculate differentially expressed metabolites at different time points
+
+Differential analysis will be calculated for the following comparisons
+
+```{r}
+
+diagram <- '
+digraph comparisons {
+newrank=true;
+
+  # graph, node, and edge definitions
+  graph [compound = true, rankdir = LR, outputorder = edgesfirst]
+
+  node [fontname = Helvetica,
+        shape = circle, 
+        width = 1]
+  
+  # nodes
+  
+  T0 [pos = "-5, 0!"]
+
+  # subgraph for WP
+  subgraph cluster0 {
+    graph [color = blue, label = "Water Pulse", rankdir = LR, style = dashed]
+    
+    # nodes
+
+    T1_wp [pos = "-4, 1!", label = "T1", fillcolor= PowderBlue, style = filled]
+    T2_wp [label = "T2", fillcolor= PowderBlue, style = filled]
+    T3_wp [label = "T3", fillcolor= PowderBlue, style = filled]
+    T4_wp [label = "T4", fillcolor= PowderBlue, style = filled]
+    
+    T1_wp -> T2_wp -> T3_wp -> T4_wp [arrowtail = none, color = black]
+  }
+  
+  # subgraph for CTR
+  subgraph cluster1 {
+    graph [color = red, label = "Control", rankdir = LR, style = dashed]
+    
+    # nodes
+
+    T1_ctr [pos = "-4, -1!",label = "T1", fillcolor= PapayaWhip, style = filled]
+    T2_ctr [label = "T2", fillcolor= PapayaWhip, style = filled]
+    T3_ctr [label = "T3", fillcolor= PapayaWhip, style = filled]
+    T4_ctr [label = "T4", fillcolor= PapayaWhip, style = filled]
+    
+    # edges
+    
+    T1_ctr -> T2_ctr -> T3_ctr -> T4_ctr [arrowtail = none, color = black]
+  }
+  
+  # edges
+  
+  T0 -> T1_wp [minlen = 2]
+  T0 -> T1_ctr [minlen = 2]
+  
+  # curved edges
+  
+  T0:n -> T1_wp:nw [constrained = false, color = "red3", dir = both]
+  T0:n -> T2_wp:nw [constrained = false, color = "red3", dir = both]
+  T0:n -> T3_wp:nw [constrained = false, color = "red3", dir = both]
+  T0:n -> T4_wp:nw [constrained = false, color = "red3", dir = both]
+  
+  T0:s -> T1_ctr:sw [constrained = false, color = "green3", dir = both]
+  T0:s -> T2_ctr:sw [constrained = false, color = "green3", dir = both]
+  T0:s -> T3_ctr:sw [constrained = false, color = "green3", dir = both]
+  T0:s -> T4_ctr:sw [constrained = false, color = "green3", dir = both]
+  
+  T1_wp -> T1_ctr [color = "blue", dir = both]
+  T2_wp -> T2_ctr [color = "blue", dir = both]
+  T3_wp -> T3_ctr [color = "blue", dir = both]
+  T4_wp -> T4_ctr [color = "blue", dir = both]
+  
+{ rank=same; T1_wp; T1_ctr}
+{ rank=same; T2_wp; T2_ctr}
+{ rank=same; T3_wp; T3_ctr}
+{ rank=same; T4_wp; T4_ctr}
+
+}
+'
+grViz(diagram)
+
+```
+
+
+## 3.1 Obtaining sample lists for all comparisons
+
+```{r}
+
+# Get the average AUC per each of the treatments
+## Get samples per treatment
+
+t0.samples <- metadata %>% filter(treatment == 'CTR', time == 'T0') %>% pull(SampleID)
+t1.ctr.samples <- metadata %>% filter(treatment == 'CTR', time == 'T1') %>% pull(SampleID)
+t2.ctr.samples <- metadata %>% filter(treatment == 'CTR', time == 'T2') %>% pull(SampleID)
+t3.ctr.samples <- metadata %>% filter(treatment == 'CTR', time == 'T3') %>% pull(SampleID)
+t4.ctr.samples <- metadata %>% filter(treatment == 'CTR', time == 'T4') %>% pull(SampleID)
+
+t1.wp.samples <- metadata %>% filter(treatment == 'WP', time == 'T1') %>% pull(SampleID)
+t2.wp.samples <- metadata %>% filter(treatment == 'WP', time == 'T2') %>% pull(SampleID)
+t3.wp.samples <- metadata %>% filter(treatment == 'WP', time == 'T3') %>% pull(SampleID)
+t4.wp.samples <- metadata %>% filter(treatment == 'WP', time == 'T4') %>% pull(SampleID)
+
+```
+
+## 3.2 DE at 24 hours after the water pulse
+
+### 3.2.1 Calculate differential expression table
+
+```{r}
+
+de.t1.c_wp <- get_diff_table(norm.matrix, 
+                             control.sample_list = t1.ctr.samples, 
+                             treatment.sample_list = t1.wp.samples, 
+                             log2_transformed = TRUE) %>% 
+  left_join(select(compounds_table, -SampleID, -AUC), by = 'FeatureID') %>% 
+  distinct() %>% 
+  mutate(Comment = case_when(log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+table_file <- file.path(tables_dir, 'de.t1.c_wp.csv')
+write_csv(de.t1.c_wp, table_file)
+```
+
+
+### 3.2.2 Volcano plot
+
+```{r}
+
+lfc.t <- 1
+pval.t <- 0.05
+
+volcano.t1.c_wp <- plot_volcano(de.t1.c_wp, log2FC, pval.adj, lfc.t, pval.t) +
+  labs(subtitle = 'DE metabolites at T1 - Wp vs Control') +
+  scale_y_continuous(limits = c(0, 4)) +
+  scale_x_continuous(limits = c(-4, 4))
+volcano.t1.c_wp
+
+figure_file <- file.path(figures_dir, 'volcano.t1.c_wp.png')
+ggsave(figure_file, volcano.t1.c_wp, dpi = 300)
+
+```
+
+## 3.3 DE at T2 after the water pulse
+
+### 3.3.1 Calculate differential expression table
+
+```{r}
+
+de.t2.c_wp <- get_diff_table(norm.matrix, 
+                             control.sample_list = t2.ctr.samples, 
+                             treatment.sample_list = t2.wp.samples, 
+                             log2_transformed = TRUE) %>% 
+  left_join(select(compounds_table, -SampleID, -AUC), by = 'FeatureID') %>% 
+  distinct() %>% 
+  mutate(Comment = case_when(log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+table_file <- file.path(tables_dir, 'de.t2.c_wp.csv')
+write_csv(de.t2.c_wp, table_file)
+```
+
+
+### 3.3.2 Volcano plot
+
+```{r}
+
+lfc.t <- 1
+pval.t <- 0.05
+
+volcano.t2.c_wp <- plot_volcano(de.t2.c_wp, log2FC, pval.adj, lfc.t, pval.t) +
+  labs(subtitle = 'DE metabolites at T2 - Wp vs Control') +
+  scale_y_continuous(limits = c(0, 4)) +
+  scale_x_continuous(limits = c(-4, 4))
+volcano.t2.c_wp
+
+figure_file <- file.path(figures_dir, 'volcano.t2.c_wp.png')
+ggsave(figure_file, volcano.t2.c_wp, dpi = 300)
+
+```
+
+## 3.4 DE at T3 after the water pulse
+
+### 3.4.1 Calculate differential expression table
+
+```{r}
+
+de.t3.c_wp <- get_diff_table(norm.matrix, 
+                             control.sample_list = t3.ctr.samples, 
+                             treatment.sample_list = t3.wp.samples, 
+                             log2_transformed = TRUE) %>% 
+  left_join(select(compounds_table, -SampleID, -AUC), by = 'FeatureID') %>% 
+  distinct() %>% 
+  mutate(Comment = case_when(log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+table_file <- file.path(tables_dir, 'de.t3.c_wp.csv')
+write_csv(de.t3.c_wp, table_file)
+```
+
+
+### 3.4.2 Volcano plot
+
+```{r}
+
+lfc.t <- 1
+pval.t <- 0.05
+
+volcano.t3.c_wp <- plot_volcano(de.t3.c_wp, log2FC, pval.adj, lfc.t, pval.t) +
+  labs(subtitle = 'DE metabolites at t3 - Wp vs Control') +
+  scale_y_continuous(limits = c(0, 4)) +
+  scale_x_continuous(limits = c(-4, 4))
+volcano.t3.c_wp
+
+figure_file <- file.path(figures_dir, 'volcano.t3.c_wp.png')
+ggsave(figure_file, volcano.t3.c_wp, dpi = 300)
+
+```
+
+## 3.5 DE at T4 after the water pulse
+
+### 3.5.1 Calculate differential expression table
+
+```{r}
+
+de.t4.c_wp <- get_diff_table(norm.matrix, 
+                             control.sample_list = t4.ctr.samples, 
+                             treatment.sample_list = t4.wp.samples, 
+                             log2_transformed = TRUE) %>% 
+  left_join(select(compounds_table, -SampleID, -AUC), by = 'FeatureID') %>% 
+  distinct() %>% 
+  mutate(Comment = case_when(log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+table_file <- file.path(tables_dir, 'de.t4.c_wp.csv')
+write_csv(de.t4.c_wp, table_file)
+```
+
+### 3.5.2 Volcano plot
+
+```{r}
+
+lfc.t <- 1
+pval.t <- 0.05
+
+volcano.t4.c_wp <- plot_volcano(de.t4.c_wp, log2FC, pval.adj, lfc.t, pval.t) +
+  labs(subtitle = 'DE metabolites at t4 - Wp vs Control') +
+  scale_y_continuous(limits = c(0, 4)) +
+  scale_x_continuous(limits = c(-4, 4))
+volcano.t4.c_wp
+
+figure_file <- file.path(figures_dir, 'volcano.t4.c_wp.png')
+ggsave(figure_file, volcano.t4.c_wp, dpi = 300)
+
+```
+
+# 4 Calculate differentially expressed metabolites between timepoints
+
+## 4.1 Control - T1 vs T0
+
+### 4.1.1 Calculate differential expression table
+
+```{r}
+
+de.ctr.t0_t1 <- get_diff_table(norm.matrix, 
+                             control.sample_list = t0.samples, 
+                             treatment.sample_list = t1.ctr.samples, 
+                             log2_transformed = TRUE) %>% 
+  left_join(select(compounds_table, -SampleID, -AUC), by = 'FeatureID') %>% 
+  distinct() %>% 
+  mutate(Comment = case_when(log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+table_file <- file.path(tables_dir, 'de.ctr.t0_t1.csv')
+write_csv(de.ctr.t0_t1, table_file)
+```
+
+### 4.1.2 Volcano plot
+
+```{r}
+
+lfc.t <- 1
+pval.t <- 0.05
+
+volcano.ctr.t0_t1 <- plot_volcano(de.ctr.t0_t1, log2FC, pval.adj, lfc.t, pval.t) +
+  labs(subtitle = 'DE metabolites CTR - T1 vs T0') +
+  scale_y_continuous(limits = c(0, 4)) +
+  scale_x_continuous(limits = c(-4, 4))
+volcano.ctr.t0_t1
+
+figure_file <- file.path(figures_dir, 'volcano.ctr.t0_t1.png')
+ggsave(figure_file, volcano.ctr.t0_t1, dpi = 300)
+
+```
+
+## 4.2 Control - T2 vs T0
+
+### 4.2.1 Calculate differential expression table
+
+```{r}
+
+de.ctr.t0_t2 <- get_diff_table(norm.matrix, 
+                             control.sample_list = t0.samples, 
+                             treatment.sample_list = t2.ctr.samples, 
+                             log2_transformed = TRUE) %>% 
+  left_join(select(compounds_table, -SampleID, -AUC), by = 'FeatureID') %>% 
+  distinct() %>% 
+  mutate(Comment = case_when(log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+table_file <- file.path(tables_dir, 'de.ctr.t0_t2.csv')
+write_csv(de.ctr.t0_t2, table_file)
+```
+
+### 4.2.2 Volcano plot
+
+```{r}
+
+lfc.t <- 1
+pval.t <- 0.05
+
+volcano.ctr.t0_t2 <- plot_volcano(de.ctr.t0_t2, log2FC, pval.adj, lfc.t, pval.t) +
+  labs(subtitle = 'DE metabolites CTR - t2 vs T0') +
+  scale_y_continuous(limits = c(0, 4)) +
+  scale_x_continuous(limits = c(-4, 4))
+volcano.ctr.t0_t2
+
+figure_file <- file.path(figures_dir, 'volcano.ctr.t0_t2.png')
+ggsave(figure_file, volcano.ctr.t0_t2, dpi = 300)
+
+```
+
+## 4.3 Control - T3 vs T0
+
+### 4.3.1 Calculate differential expression table
+
+```{r}
+
+de.ctr.t0_t3 <- get_diff_table(norm.matrix, 
+                             control.sample_list = t0.samples, 
+                             treatment.sample_list = t3.ctr.samples, 
+                             log2_transformed = TRUE) %>% 
+  left_join(select(compounds_table, -SampleID, -AUC), by = 'FeatureID') %>% 
+  distinct() %>% 
+  mutate(Comment = case_when(log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+table_file <- file.path(tables_dir, 'de.ctr.t0_t3.csv')
+write_csv(de.ctr.t0_t3, table_file)
+```
+
+### 4.3.2 Volcano plot
+
+```{r}
+
+lfc.t <- 1
+pval.t <- 0.05
+
+volcano.ctr.t0_t3 <- plot_volcano(de.ctr.t0_t3, log2FC, pval.adj, lfc.t, pval.t) +
+  labs(subtitle = 'DE metabolites CTR - t3 vs T0') +
+  scale_y_continuous(limits = c(0, 4)) +
+  scale_x_continuous(limits = c(-4, 4))
+volcano.ctr.t0_t3
+
+figure_file <- file.path(figures_dir, 'volcano.ctr.t0_t3.png')
+ggsave(figure_file, volcano.ctr.t0_t3, dpi = 300)
+
+```
+
+
+## 4.4 Control - T4 vs T0
+
+### 4.4.1 Calculate differential expression table
+
+```{r}
+
+de.ctr.t0_t4 <- get_diff_table(norm.matrix, 
+                             control.sample_list = t0.samples, 
+                             treatment.sample_list = t4.ctr.samples, 
+                             log2_transformed = TRUE) %>% 
+  left_join(select(compounds_table, -SampleID, -AUC), by = 'FeatureID') %>% 
+  distinct() %>% 
+  mutate(Comment = case_when(log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+table_file <- file.path(tables_dir, 'de.ctr.t0_t4.csv')
+write_csv(de.ctr.t0_t4, table_file)
+```
+
+### 4.4.2 Volcano plot
+
+```{r}
+
+lfc.t <- 1
+pval.t <- 0.05
+
+volcano.ctr.t0_t4 <- plot_volcano(de.ctr.t0_t4, log2FC, pval.adj, lfc.t, pval.t) +
+  labs(subtitle = 'DE metabolites CTR - t4 vs T0') +
+  scale_y_continuous(limits = c(0, 4)) +
+  scale_x_continuous(limits = c(-4, 4))
+volcano.ctr.t0_t4
+
+figure_file <- file.path(figures_dir, 'volcano.ctr.t0_t4.png')
+ggsave(figure_file, volcano.ctr.t0_t4, dpi = 300)
+
+```
+
+## 4.5 WP - T1 vs T0
+
+### 4.5.1 Calculate differential expression table
+
+```{r}
+
+de.wp.t0_t1 <- get_diff_table(norm.matrix, 
+                              control.sample_list = t0.samples, 
+                              treatment.sample_list = t1.wp.samples, 
+                              log2_transformed = TRUE) %>% 
+  left_join(select(compounds_table, -SampleID, -AUC), by = 'FeatureID') %>% 
+  distinct() %>% 
+  mutate(Comment = case_when(log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+table_file <- file.path(tables_dir, 'de.wp.t0_t1.csv')
+write_csv(de.wp.t0_t1, table_file)
+```
+
+### 4.5.2 Volcano plot
+
+```{r}
+
+lfc.t <- 1
+pval.t <- 0.05
+
+volcano.wp.t0_t1 <- plot_volcano(de.wp.t0_t1, log2FC, pval.adj, lfc.t, pval.t) +
+  labs(subtitle = 'DE metabolites WP - t1 vs T0') +
+  scale_y_continuous(limits = c(0, 4)) +
+  scale_x_continuous(limits = c(-4, 4))
+volcano.wp.t0_t1
+
+figure_file <- file.path(figures_dir, 'volcano.wp.t0_t1.png')
+ggsave(figure_file, volcano.wp.t0_t1, dpi = 300)
+
+```
+
+## 4.6 WP - T2 vs T0
+
+### 4.6.1 Calculate differential expression table
+
+```{r}
+
+de.wp.t0_t2 <- get_diff_table(norm.matrix, 
+                              control.sample_list = t0.samples, 
+                              treatment.sample_list = t2.wp.samples, 
+                              log2_transformed = TRUE) %>% 
+  left_join(select(compounds_table, -SampleID, -AUC), by = 'FeatureID') %>% 
+  distinct() %>% 
+  mutate(Comment = case_when(log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+table_file <- file.path(tables_dir, 'de.wp.t0_t2.csv')
+write_csv(de.wp.t0_t2, table_file)
+```
+
+### 4.6.2 Volcano plot
+
+```{r}
+
+lfc.t <- 1
+pval.t <- 0.05
+
+volcano.wp.t0_t2 <- plot_volcano(de.wp.t0_t2, log2FC, pval.adj, lfc.t, pval.t) +
+  labs(subtitle = 'DE metabolites WP - t2 vs T0') +
+  scale_y_continuous(limits = c(0, 4)) +
+  scale_x_continuous(limits = c(-4, 4))
+volcano.wp.t0_t2
+
+figure_file <- file.path(figures_dir, 'volcano.wp.t0_t2.png')
+ggsave(figure_file, volcano.wp.t0_t2, dpi = 300)
+
+```
+
+## 4.7 WP - T3 vs T0
+
+### 4.7.1 Calculate differential expression table
+
+```{r}
+
+de.wp.t0_t3 <- get_diff_table(norm.matrix, 
+                              control.sample_list = t0.samples, 
+                              treatment.sample_list = t3.wp.samples, 
+                              log2_transformed = TRUE) %>% 
+  left_join(select(compounds_table, -SampleID, -AUC), by = 'FeatureID') %>% 
+  distinct() %>% 
+  mutate(Comment = case_when(log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+table_file <- file.path(tables_dir, 'de.wp.t0_t3.csv')
+write_csv(de.wp.t0_t3, table_file)
+```
+
+### 4.7.2 Volcano plot
+
+```{r}
+
+lfc.t <- 1
+pval.t <- 0.05
+
+volcano.wp.t0_t3 <- plot_volcano(de.wp.t0_t3, log2FC, pval.adj, lfc.t, pval.t) +
+  labs(subtitle = 'DE metabolites WP - t3 vs T0') +
+  scale_y_continuous(limits = c(0, 4)) +
+  scale_x_continuous(limits = c(-4, 4))
+volcano.wp.t0_t3
+
+figure_file <- file.path(figures_dir, 'volcano.wp.t0_t3.png')
+ggsave(figure_file, volcano.wp.t0_t3, dpi = 300)
+
+```
+
+## 4.8 WP - T4 vs T0
+
+### 4.8.1 Calculate differential expression table
+
+```{r}
+
+de.wp.t0_t4 <- get_diff_table(norm.matrix, 
+                              control.sample_list = t0.samples, 
+                              treatment.sample_list = t4.wp.samples, 
+                              log2_transformed = TRUE) %>% 
+  left_join(select(compounds_table, -SampleID, -AUC), by = 'FeatureID') %>% 
+  distinct() %>% 
+  mutate(Comment = case_when(log2FC < 0 ~ 'Downregulated',
+                             log2FC > 0 ~ 'Upregulated'))
+
+table_file <- file.path(tables_dir, 'de.wp.t0_t4.csv')
+write_csv(de.wp.t0_t4, table_file)
+```
+
+### 4.8.2 Volcano plot
+
+```{r}
+
+lfc.t <- 1
+pval.t <- 0.05
+
+volcano.wp.t0_t4 <- plot_volcano(de.wp.t0_t4, log2FC, pval.adj, lfc.t, pval.t) +
+  labs(subtitle = 'DE metabolites WP - t4 vs T0') +
+  scale_y_continuous(limits = c(0, 4)) +
+  scale_x_continuous(limits = c(-4, 4))
+volcano.wp.t0_t4
+
+figure_file <- file.path(figures_dir, 'volcano.wp.t0_t4.png')
+ggsave(figure_file, volcano.wp.t0_t4, dpi = 300)
+
+```
+
+### Volcano mixed
+
+```{r}
+volcano_treatment <- ggarrange(volcano.t1.c_wp, volcano.t2.c_wp, volcano.t3.c_wp, volcano.t4.c_wp, ncol = 4)
+volcano_treatment <- annotate_figure(volcano_treatment, top = text_grob('Comparisons of treatments per time', 
+                                                                        face = 'bold', size = 20))
+volcano_ctr <- ggarrange(volcano.ctr.t0_t1, volcano.ctr.t0_t2, volcano.ctr.t0_t3, volcano.ctr.t0_t4, ncol = 4)
+volcano_ctr <- annotate_figure(volcano_ctr, top = text_grob('Comparisons of different times within control samples', 
+                                                                        face = 'bold', size = 20))
+volcano_wp <- ggarrange(volcano.wp.t0_t1, volcano.wp.t0_t2, volcano.wp.t0_t3, volcano.wp.t0_t4, ncol = 4)
+volcano_wp <- annotate_figure(volcano_wp, top = text_grob('Comparisons of different times within WP samples', 
+                                                                        face = 'bold', size = 20))
+
+volcano_all <- ggarrange(volcano_treatment, volcano_ctr, volcano_wp, nrow = 3)
+
+figure_file <- file.path(figures_dir, 'volcano.all.png')
+ggsave(figure_file, volcano_all, dpi = 300, width = 18, height = 10)
+
+```
+
+
+## Summary graph
+
+`to be added`
+
+# 5. Hierarchical clustering analysis using heatmaps
+
+Multiple heatmaps will be plotted, based on the differential expression and if the compounds were or not assigned and structure
+
+### Normalized Area under the curve (AUC) heatmap for all detected features
+
+```{r warning=FALSE}
+
+# Initialize graphical device
+dev.off()
+
+# Set sampleID as row.names to annotate heatmap
+
+col_annot <- metadata %>% 
+  filter(!is.na(treatment)) %>% 
+  select(-`Sample Type`) %>% 
+  column_to_rownames(var = 'SampleID')
+mapcolor <- colorRampPalette(brewer.pal(11, 'RdYlBu'))(100)[100:1]
+
+figure_file <- file.path(figures_dir, 'All_features_heatmap.pdf')
+
+annot_colors <- list(
+  time = c(T0 = "#374E55FF", T1 = "#DF8F44FF", T2 = "#00A1D5FF", T3 = "#B24745FF", T4 = "#79AF97FF"),
+  treatment = c(CTR ="#1B9E77", WP ="#7570B3"))
+
+pdf(figure_file)
+pheatmap(norm.matrix,
+         clustering_distance_rows = 'correlation',
+         clustering_distance_cols = 'correlation',
+         scale = 'row',
+         annotation_col = col_annot,
+         annotation_colors = annot_colors,
+         color = mapcolor,
+         show_rownames = FALSE,
+         cutree_cols = 2,
+         main = 'All features (normalized AUC)'
+)
+dev.off()
+```
+
+[Scaled Area under the curve (AUC) heatmap for all detected features](`r toString(figure_file)`)
+
+
