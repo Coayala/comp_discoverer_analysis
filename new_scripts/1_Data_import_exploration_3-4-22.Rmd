@@ -1,5 +1,5 @@
 ---
-title: "RP Lab Incubations - Data Exploration"
+title: "Data Exploration"
 author: "Christian Ayala & Viviana Freire"
 output:
   html_document:
