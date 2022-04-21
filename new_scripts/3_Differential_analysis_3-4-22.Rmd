@@ -1,5 +1,5 @@
 ---
-title: "RP Lab Incubations - Differential Analysis"
+title: "Differential Analysis"
 author: "Christian Ayala & Viviana Freire"
 date: "3/19/2021"
 output: html_document
