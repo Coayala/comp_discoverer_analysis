@@ -1,5 +1,5 @@
 ---
-title: "RP Lab Incubations - Normalization and Statistical Analysis"
+title: "Normalization and Statistical Analysis"
 author: "Christian Ayala & Viviana Freire"
 output:
   html_document:
