@@ -218,12 +218,11 @@ plot_vank <- function(df, color_by, facet_by = NULL, facet_by2 = NULL){
 }
 
 # -------------------------------------------------------------------------
-plot_col <- function(df, my_x, my_y, color_by1, color_by2, dodge = FALSE){
+plot_col <- function(df, my_x, my_y, color_by1, dodge = FALSE){
   ggplot(df,
          aes(x = {{my_x}},
              y = {{my_y}})) +
-    geom_col(aes(fill = {{color_by1}},
-                 color = {{color_by2}}),
+    geom_col(aes(fill = {{color_by1}}),
              size = 2,
              width = 0.75,
              position = ifelse(dodge == TRUE, 'dodge', 'stack')) +

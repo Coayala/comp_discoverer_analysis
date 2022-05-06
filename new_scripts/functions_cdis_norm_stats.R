@@ -101,11 +101,10 @@ max.norm <- function(matrix, transform_data = TRUE){
 } 
 
 # -------------------------------------------------------------------------
-plot_boxplot <- function(df, my_x, my_y, color_by){
+plot_boxplot <- function(df, my_x, my_y){
   ggplot(df,
          aes(x = {{my_x}},
-             y = {{my_y}},
-             fill = {{color_by}})) +
+             y = {{my_y}})) +
     geom_boxplot() +
     scale_fill_jama() +
     theme_bw() +
