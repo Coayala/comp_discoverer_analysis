@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "If you use the scripts from this repository, please cite it as below."
 authors:
-- family-names: "Christian"
-  given-names: "Ayala-Ortiz"
+- family-names: "Ayala-Ortiz"
+  given-names: "Christian"
   orcid: "https://orcid.org/0000-0001-8154-2378"
 title: "Scripts for analysis of LC-MS/MS data"
 version: 2.0.0
